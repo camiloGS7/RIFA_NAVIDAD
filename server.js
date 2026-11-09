@@ -7,10 +7,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 if (!process.env.DATABASE_URL) {
-  console.warn('⚠️  ADVERTENCIA: La variable de entorno DATABASE_URL no está definida.');
+  console.warn('[WARN] La variable de entorno DATABASE_URL no esta definida.');
 }
 
-// Configuración del Pool de PostgreSQL optimizada para Neon DB
+// Configuracion del Pool de PostgreSQL optimizada para Neon DB
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL
@@ -25,8 +25,8 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 /**
- * Inicializa automáticamente la tabla `boletos_rifa` y los 100 números ('01' al '99' y '00')
- * si aún no existen en Neon DB.
+ * Inicializa automaticamente la tabla `boletos_rifa` y los 100 numeros ('01' al '99' y '00')
+ * si aun no existen en Neon DB.
  */
 async function initDatabase() {
   if (!process.env.DATABASE_URL) return;
@@ -62,9 +62,9 @@ async function initDatabase() {
       ON CONFLICT (numero) DO NOTHING;
     `);
 
-    console.log('✅ Base de datos Neon DB verificada y lista (100 boletos inicializados).');
+    console.log('[INFO] Base de datos verificada correctamente (100 boletos inicializados).');
   } catch (error) {
-    console.error('❌ Error al inicializar la base de datos:', error.message);
+    console.error('[ERROR] Fallo al inicializar la base de datos:', error.message);
   } finally {
     client.release();
   }
@@ -72,7 +72,7 @@ async function initDatabase() {
 
 /**
  * GET /api/boletos
- * Obtiene los 100 números ordenados del '01' al '99' y terminando en '00'.
+ * Obtiene los 100 numeros ordenados del '01' al '99' y terminando en '00'.
  */
 app.get('/api/boletos', async (req, res) => {
   try {
@@ -87,7 +87,7 @@ app.get('/api/boletos', async (req, res) => {
       boletos: result.rows,
     });
   } catch (error) {
-    console.error('Error en GET /api/boletos:', error);
+    console.error('[ERROR] GET /api/boletos:', error.message);
     res.status(500).json({
       ok: false,
       mensaje: 'Error al obtener los boletos desde la base de datos.',
@@ -97,8 +97,8 @@ app.get('/api/boletos', async (req, res) => {
 
 /**
  * POST /api/comprar
- * Registra la venta de un número si está disponible (estado = FALSE).
- * Body: { numero: "01", nombre_comprador: "María Pérez" }
+ * Registra la venta de un numero si esta disponible (estado = FALSE).
+ * Body: { numero: "01", nombre_comprador: "Maria Perez" }
  */
 app.post('/api/comprar', async (req, res) => {
   try {
@@ -109,7 +109,7 @@ app.post('/api/comprar', async (req, res) => {
     if (!/^\d{2}$/.test(numeroLimpio)) {
       return res.status(400).json({
         ok: false,
-        mensaje: 'El número de boleto debe tener 2 dígitos (01 al 99 o 00).',
+        mensaje: 'El numero de boleto debe tener 2 digitos (01 al 99 o 00).',
       });
     }
 
@@ -120,7 +120,7 @@ app.post('/api/comprar', async (req, res) => {
       });
     }
 
-    // Actualización atómica: solo actualiza si estado = FALSE (evita dobles ventas)
+    // Actualizacion atomica: solo actualiza si estado = FALSE (evita dobles ventas)
     const result = await pool.query(
       `
       UPDATE boletos_rifa
@@ -136,17 +136,17 @@ app.post('/api/comprar', async (req, res) => {
     if (result.rowCount === 0) {
       return res.status(409).json({
         ok: false,
-        mensaje: `El número ${numeroLimpio} ya fue vendido o no está disponible.`,
+        mensaje: `El numero ${numeroLimpio} ya fue vendido o no esta disponible.`,
       });
     }
 
     res.json({
       ok: true,
-      mensaje: `¡Número ${numeroLimpio} registrado exitosamente a nombre de ${compradorLimpio}!`,
+      mensaje: `Numero ${numeroLimpio} registrado exitosamente a nombre de ${compradorLimpio}.`,
       boleto: result.rows[0],
     });
   } catch (error) {
-    console.error('Error en POST /api/comprar:', error);
+    console.error('[ERROR] POST /api/comprar:', error.message);
     res.status(500).json({
       ok: false,
       mensaje: 'No se pudo guardar la venta en la base de datos.',
@@ -156,7 +156,7 @@ app.post('/api/comprar', async (req, res) => {
 
 /**
  * POST /api/liberar
- * Permite liberar un número desde el panel de Cuadre de Caja en caso de error de digitación.
+ * Permite liberar un numero desde el panel de Cuadre de Caja en caso de error de digitacion.
  * Body: { numero: "01" }
  */
 app.post('/api/liberar', async (req, res) => {
@@ -167,7 +167,7 @@ app.post('/api/liberar', async (req, res) => {
     if (!/^\d{2}$/.test(numeroLimpio)) {
       return res.status(400).json({
         ok: false,
-        mensaje: 'Número inválido.',
+        mensaje: 'Numero invalido.',
       });
     }
 
@@ -192,11 +192,11 @@ app.post('/api/liberar', async (req, res) => {
 
     res.json({
       ok: true,
-      mensaje: `El número ${numeroLimpio} está disponible nuevamente.`,
+      mensaje: `El numero ${numeroLimpio} esta disponible nuevamente.`,
       boleto: result.rows[0],
     });
   } catch (error) {
-    console.error('Error en POST /api/liberar:', error);
+    console.error('[ERROR] POST /api/liberar:', error.message);
     res.status(500).json({
       ok: false,
       mensaje: 'Error al liberar el boleto.',
@@ -206,7 +206,7 @@ app.post('/api/liberar', async (req, res) => {
 
 /**
  * GET /api/health
- * Ruta de verificación de estado para Railway
+ * Ruta de verificacion de estado para Railway
  */
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -218,6 +218,6 @@ app.get('*', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', async () => {
-  console.log(`🎄 Servidor de Gran Rifa Navideña activo en el puerto ${PORT}`);
+  console.log(`[INFO] Servidor iniciado en el puerto ${PORT}`);
   await initDatabase();
 });

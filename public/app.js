@@ -37,12 +37,11 @@ const textoBtnGuardar = document.getElementById('texto-btn-guardar');
 
 const toastNotificacion = document.getElementById('toast-notificacion');
 const toastMensaje = document.getElementById('toast-mensaje');
-const toastIcono = document.getElementById('toast-icono');
 
 let toastTimeout = null;
 
 /**
- * Formatea un valor numérico en pesos colombianos ($10.000)
+ * Formatea un valor numerico en pesos colombianos ($10.000)
  */
 function formatearPesos(valor) {
   return '$' + Number(valor).toLocaleString('es-CO');
@@ -52,9 +51,9 @@ function formatearPesos(valor) {
  * Formatea la fecha de venta de forma legible y corta
  */
 function formatearFecha(fechaIso) {
-  if (!fechaIso) return '—';
+  if (!fechaIso) return '-';
   const fecha = new Date(fechaIso);
-  if (isNaN(fecha.getTime())) return '—';
+  if (isNaN(fecha.getTime())) return '-';
   return fecha.toLocaleString('es-CO', {
     day: '2-digit',
     month: 'short',
@@ -64,10 +63,9 @@ function formatearFecha(fechaIso) {
 }
 
 /**
- * Muestra un mensaje flotante rápido (Toast)
+ * Muestra un mensaje flotante rapido (Toast)
  */
-function mostrarToast(mensaje, icono = '🎄') {
-  toastIcono.textContent = icono;
+function mostrarToast(mensaje) {
   toastMensaje.textContent = mensaje;
   toastNotificacion.classList.remove('hidden');
 
@@ -78,7 +76,7 @@ function mostrarToast(mensaje, icono = '🎄') {
 }
 
 /**
- * Genera una lista local de respaldo ('01' al '99' y '00') si aún no hay conexión a BD
+ * Genera una lista local de respaldo ('01' al '99' y '00') si aun no hay conexion a BD
  */
 function generarBoletosRespaldo() {
   const lista = [];
@@ -115,7 +113,7 @@ async function cargarBoletos() {
     if (boletos.length === 0) {
       boletos = generarBoletosRespaldo();
     }
-    mostrarToast('Verifica la conexión a la base de datos (DATABASE_URL)', '⚠️');
+    mostrarToast('Verifica la conexion a la base de datos (DATABASE_URL).');
   } finally {
     estadoCarga.classList.add('hidden');
     grillaBoletos.classList.remove('hidden');
@@ -124,7 +122,7 @@ async function cargarBoletos() {
 }
 
 /**
- * Renderiza tanto la cuadrícula 10x10 como las estadísticas y la tabla de Cuadre de Caja
+ * Renderiza tanto la cuadricula 10x10 como las estadisticas y la tabla de Cuadre de Caja
  */
 function renderizarTodo() {
   renderizarGrilla();
@@ -132,7 +130,7 @@ function renderizarTodo() {
 }
 
 /**
- * Construye la cuadrícula 10x10 del 01 al 99 y terminando en 00
+ * Construye la cuadricula 10x10 del 01 al 99 y terminando en 00
  */
 function renderizarGrilla() {
   grillaBoletos.innerHTML = '';
@@ -150,7 +148,7 @@ function renderizarGrilla() {
       boton.title = `VENDIDO a: ${boleto.nombre_comprador || 'Comprador registrado'}`;
       boton.innerHTML = `
         <span class="leading-none line-through decoration-amber-400/80">${boleto.numero}</span>
-        <span class="text-[9px] sm:text-[10px] leading-none text-amber-300 font-extrabold mt-0.5 uppercase tracking-tighter">★</span>
+        <span class="text-[8px] sm:text-[9px] leading-none text-amber-300 font-extrabold mt-0.5 uppercase tracking-tighter">VENDIDO</span>
       `;
     } else {
       // Boleto DISPONIBLE
@@ -199,8 +197,8 @@ function renderizarEstadisticasYCuadre() {
   if (vendidosFiltrados.length === 0) {
     estadoSinVentas.classList.remove('hidden');
     estadoSinVentas.textContent = termino
-      ? 'No se encontraron ventas que coincidan con tu búsqueda.'
-      : 'Aún no hay boletos vendidos. Haz clic en un número de la cuadrícula para registrar la primera venta.';
+      ? 'No se encontraron ventas que coincidan con la busqueda.'
+      : 'Aun no hay boletos vendidos. Haz clic en un numero de la cuadricula para registrar la primera venta.';
     return;
   }
 
@@ -216,7 +214,7 @@ function renderizarEstadisticasYCuadre() {
 
     const tdComprador = document.createElement('td');
     tdComprador.className = 'py-2.5 px-3 font-bold text-white';
-    tdComprador.textContent = boleto.nombre_comprador || '—';
+    tdComprador.textContent = boleto.nombre_comprador || '-';
 
     const tdFecha = document.createElement('td');
     tdFecha.className = 'py-2.5 px-3 text-xs text-red-200 hidden sm:table-cell whitespace-nowrap';
@@ -229,7 +227,7 @@ function renderizarEstadisticasYCuadre() {
     btnLiberar.type = 'button';
     btnLiberar.className =
       'px-2.5 py-1 rounded-lg bg-red-900/90 hover:bg-red-700 text-red-200 hover:text-white text-xs font-bold border border-red-400/30 transition';
-    btnLiberar.title = 'Anular venta y liberar número';
+    btnLiberar.title = 'Anular venta y liberar numero';
     btnLiberar.textContent = 'Anular';
     btnLiberar.addEventListener('click', () => liberarBoleto(boleto));
 
@@ -245,7 +243,7 @@ function renderizarEstadisticasYCuadre() {
 }
 
 /**
- * Abre el modal rápido para vender el número seleccionado
+ * Abre el modal rapido para vender el numero seleccionado
  */
 function abrirModalVenta(numero) {
   numeroSeleccionado = numero;
@@ -257,7 +255,7 @@ function abrirModalVenta(numero) {
 
   modalVenta.classList.remove('hidden');
 
-  // Foco inmediato en el campo de nombre para escribir y presionar Enter sin más clics
+  // Foco inmediato en el campo de nombre para escribir y presionar Enter sin mas clics
   setTimeout(() => {
     inputComprador.focus();
   }, 40);
@@ -323,7 +321,7 @@ formVenta.addEventListener('submit', async (evento) => {
 
     cerrarModalVenta();
     renderizarTodo();
-    mostrarToast(`¡Boleto #${numeroVendido} vendido a ${nombreComprador}!`, '✅');
+    mostrarToast(`Boleto #${numeroVendido} registrado a nombre de ${nombreComprador}.`);
   } catch (error) {
     guardandoVenta = false;
     btnGuardarVenta.disabled = false;
@@ -331,13 +329,12 @@ formVenta.addEventListener('submit', async (evento) => {
 
     modalError.textContent = error.message;
     modalError.classList.remove('hidden');
-    // Recargar el talonario por si otro dispositivo vendió el número
     await cargarBoletos();
   }
 });
 
 /**
- * Permite anular una venta en caso de error de digitación en el mostrador
+ * Permite anular una venta en caso de error de digitacion en el mostrador
  */
 async function liberarBoleto(boleto) {
   const confirmar = window.confirm(
@@ -363,9 +360,9 @@ async function liberarBoleto(boleto) {
     }
 
     renderizarTodo();
-    mostrarToast(`Boleto #${boleto.numero} liberado y disponible.`, '🔄');
+    mostrarToast(`Boleto #${boleto.numero} liberado y disponible nuevamente.`);
   } catch (error) {
-    mostrarToast(error.message, '⚠️');
+    mostrarToast(error.message);
   }
 }
 
@@ -379,7 +376,6 @@ modalVenta.addEventListener('click', (e) => {
 
 btnAbrirCuadre.addEventListener('click', () => {
   panelCuadre.classList.remove('hidden');
-  // En pantallas grandes desplazarse suavemente o enfocar el buscador
   setTimeout(() => inputBuscarVendido.focus(), 50);
 });
 
@@ -406,5 +402,5 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// Inicializar aplicación al cargar
+// Inicializar aplicacion al cargar
 document.addEventListener('DOMContentLoaded', cargarBoletos);
