@@ -10,16 +10,37 @@ if (!process.env.DATABASE_URL) {
   console.warn('[WARN] La variable de entorno DATABASE_URL no esta definida.');
 }
 
-// Configuracion del Pool de PostgreSQL optimizada para Neon DB
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL
-    ? { rejectUnauthorized: false }
-    : false,
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
-});
+/**
+ * Construye la configuracion de conexion para PostgreSQL (Neon DB),
+ * asegurando compatibilidad TLS con el driver pg en entornos PaaS (Railway).
+ */
+function buildPoolConfig(rawUrl) {
+  if (!rawUrl) {
+    return {};
+  }
+  try {
+    const parsed = new URL(rawUrl);
+    parsed.searchParams.delete('sslmode');
+    parsed.searchParams.delete('channel_binding');
+    return {
+      connectionString: parsed.toString(),
+      ssl: { rejectUnauthorized: false },
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    };
+  } catch (error) {
+    return {
+      connectionString: rawUrl,
+      ssl: { rejectUnauthorized: false },
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    };
+  }
+}
+
+const pool = new Pool(buildPoolConfig(process.env.DATABASE_URL));
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
