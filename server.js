@@ -7,7 +7,7 @@ const path = require('path');
 const express = require('express');
 
 const db = require('./lib/db');
-const { validarNumero, validarComprador } = require('./lib/validacion');
+const { validarNumero, validarComprador, validarPagado } = require('./lib/validacion');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PRECIO_BOLETO = Number(process.env.PRECIO_BOLETO) || 10000;
@@ -113,6 +113,7 @@ boletos.get(
   manejar(async (req, res) => {
     const lista = await db.listarBoletos();
     const vendidos = lista.filter((b) => b.vendido).length;
+    const pagados = lista.filter((b) => b.pagado).length;
     res.json({
       ok: true,
       precio: PRECIO_BOLETO,
@@ -120,7 +121,10 @@ boletos.get(
         total: lista.length,
         vendidos,
         disponibles: lista.length - vendidos,
-        recaudado: vendidos * PRECIO_BOLETO,
+        pagados,
+        pendientesDePago: vendidos - pagados,
+        recaudado: pagados * PRECIO_BOLETO,
+        porCobrar: (vendidos - pagados) * PRECIO_BOLETO,
       },
       boletos: lista,
     });
@@ -140,11 +144,12 @@ boletos.get(
       return '"' + texto.replace(/"/g, '""') + '"';
     };
 
-    const filas = [['Numero', 'Nombre', 'Telefono', 'Fecha de venta']].concat(
+    const filas = [['Numero', 'Nombre', 'Telefono', 'Pago', 'Fecha de venta']].concat(
       lista.map((b) => [
         b.numero,
         b.nombre,
         b.telefono,
+        b.pagado ? 'Pagado' : 'Pendiente',
         b.fechaVenta
           ? new Date(b.fechaVenta).toLocaleString('es-CO', { timeZone: 'America/Bogota' })
           : '',
@@ -178,7 +183,8 @@ boletos.post(
       });
     }
 
-    const boleto = await db.venderBoleto(numero, comprador.valor.nombre, comprador.valor.telefono);
+    const { nombre, telefono, pagado } = comprador.valor;
+    const boleto = await db.venderBoleto(numero, nombre, telefono, pagado);
     if (!boleto) {
       if (!(await db.existeBoleto(numero))) {
         return res.status(404).json({ ok: false, mensaje: `El boleto ${numero} no existe.` });
@@ -209,11 +215,29 @@ boletos.put(
       });
     }
 
-    const boleto = await db.actualizarComprador(
-      numero,
-      comprador.valor.nombre,
-      comprador.valor.telefono
-    );
+    const { nombre, telefono, pagado } = comprador.valor;
+    const boleto = await db.actualizarComprador(numero, nombre, telefono, pagado);
+    if (!boleto) {
+      return res.status(404).json({ ok: false, mensaje: `El numero ${numero} no esta vendido.` });
+    }
+
+    res.json({ ok: true, boleto });
+  })
+);
+
+/** PATCH /api/boletos/:numero/pago — Marca un boleto vendido como pagado o pendiente. */
+boletos.patch(
+  '/:numero/pago',
+  manejar(async (req, res) => {
+    const numero = numeroDesdeRuta(req, res);
+    if (!numero) return;
+
+    const pagado = validarPagado(req.body && req.body.pagado);
+    if (pagado.error) {
+      return res.status(400).json({ ok: false, mensaje: pagado.error });
+    }
+
+    const boleto = await db.marcarPago(numero, pagado.valor);
     if (!boleto) {
       return res.status(404).json({ ok: false, mensaje: `El numero ${numero} no esta vendido.` });
     }

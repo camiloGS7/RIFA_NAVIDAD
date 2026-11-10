@@ -201,10 +201,14 @@ function renderizar() {
 
 function renderizarResumen() {
   const vendidos = estado.boletos.filter((b) => b.vendido).length;
+  const pagados = estado.boletos.filter((b) => b.pagado).length;
+  const deben = vendidos - pagados;
   const total = estado.boletos.length || 100;
   $('#res-vendidos').textContent = vendidos;
   $('#res-disponibles').textContent = total - vendidos;
-  $('#res-recaudado').textContent = formatearPesos(vendidos * estado.precio);
+  $('#res-recaudado').textContent = formatearPesos(pagados * estado.precio);
+  $('#res-por-cobrar').textContent = formatearPesos(deben * estado.precio);
+  $('#res-pendientes').textContent = deben > 0 ? `(${deben} ${deben === 1 ? 'persona' : 'personas'})` : '';
   $('#res-barra').style.width = `${(vendidos / total) * 100}%`;
   document.querySelectorAll('[data-precio]').forEach((n) => {
     n.textContent = formatearPesos(estado.precio);
@@ -216,20 +220,22 @@ function renderizarGrilla() {
   const fragmento = document.createDocumentFragment();
 
   estado.boletos.forEach((boleto) => {
-    const boton = crear('button', 'numero' + (boleto.vendido ? ' numero--vendido' : ''));
+    let clase = 'numero';
+    if (boleto.vendido) clase += boleto.pagado ? ' numero--vendido' : ' numero--debe';
+    const boton = crear('button', clase);
     boton.type = 'button';
     boton.dataset.numero = boleto.numero;
     boton.setAttribute(
       'aria-label',
       boleto.vendido
-        ? `Número ${boleto.numero}, vendido a ${boleto.nombre}`
+        ? `Número ${boleto.numero}, vendido a ${boleto.nombre}, ${boleto.pagado ? 'pagado' : 'falta pagar'}`
         : `Número ${boleto.numero}, libre`
     );
     boton.appendChild(crear('span', null, boleto.numero));
 
     if (boleto.vendido) {
       const marca = crear('span', 'numero__marca');
-      marca.appendChild(icono('check'));
+      marca.appendChild(icono(boleto.pagado ? 'check' : 'clock'));
       boton.appendChild(marca);
     }
     fragmento.appendChild(boton);
@@ -243,7 +249,11 @@ function renderizarCompradores() {
   const termino = $('#buscar').value.trim().toLowerCase();
   const terminoDigitos = termino.replace(/\D/g, '');
 
+  const filtroPago = (document.querySelector('input[name="filtro-pago"]:checked') || {}).value || 'todos';
+
   const filtrados = vendidos.filter((b) => {
+    if (filtroPago === 'pagados' && !b.pagado) return false;
+    if (filtroPago === 'deben' && b.pagado) return false;
     if (!termino) return true;
     return (
       (b.nombre || '').toLowerCase().includes(termino) ||
@@ -252,10 +262,12 @@ function renderizarCompradores() {
     );
   });
 
+  const deben = vendidos.filter((b) => !b.pagado).length;
   $('#compradores-conteo').textContent =
     vendidos.length === 0
       ? 'Aún no hay ventas.'
-      : `${vendidos.length} ${vendidos.length === 1 ? 'número vendido' : 'números vendidos'}.`;
+      : `${vendidos.length} ${vendidos.length === 1 ? 'número vendido' : 'números vendidos'}` +
+        (deben > 0 ? `, ${deben} sin pagar.` : '. Todos pagaron.');
 
   const lista = $('#lista-compradores');
   const fragmento = document.createDocumentFragment();
@@ -266,10 +278,11 @@ function renderizarCompradores() {
     boton.type = 'button';
     boton.dataset.numero = boleto.numero;
 
-    boton.appendChild(crear('span', 'ficha', boleto.numero));
+    boton.appendChild(crear('span', boleto.pagado ? 'ficha' : 'ficha ficha--debe', boleto.numero));
     const info = crear('span', 'comprador__info');
     info.appendChild(crear('span', 'comprador__nombre', boleto.nombre));
     info.appendChild(crear('span', 'comprador__telefono', formatearTelefono(boleto.telefono)));
+    info.appendChild(etiquetaPago(boleto.pagado));
     boton.appendChild(info);
 
     item.appendChild(boton);
@@ -280,9 +293,15 @@ function renderizarCompradores() {
 
   const vacio = $('#lista-vacia');
   if (filtrados.length === 0) {
-    vacio.textContent = termino
-      ? 'No se encontró ningún comprador con esa búsqueda.'
-      : 'Cuando venda un número, el comprador aparecerá aquí.';
+    if (termino) {
+      vacio.textContent = 'No se encontró ningún comprador con esa búsqueda.';
+    } else if (vendidos.length > 0 && filtroPago === 'deben') {
+      vacio.textContent = 'Nadie debe. Todos los compradores ya pagaron.';
+    } else if (vendidos.length > 0 && filtroPago === 'pagados') {
+      vacio.textContent = 'Todavía nadie ha pagado.';
+    } else {
+      vacio.textContent = 'Cuando venda un número, el comprador aparecerá aquí.';
+    }
     vacio.hidden = false;
   } else {
     vacio.hidden = true;
@@ -306,8 +325,20 @@ function cambiarVista(vista, { enfocar = false } = {}) {
 
 /* ------------------------------ Ventana del número ------------------------------ */
 
+/** Etiqueta visible "Pagado" / "Falta pagar" con icono (no depende solo del color). */
+function etiquetaPago(pagado) {
+  const etiqueta = crear('span', `etiqueta-pago etiqueta-pago--${pagado ? 'si' : 'no'}`);
+  etiqueta.append(icono(pagado ? 'check' : 'clock'), crear('span', null, pagado ? 'Pagado' : 'Falta pagar'));
+  return etiqueta;
+}
+
+function pagoElegido() {
+  const opcion = document.querySelector('input[name="pagado"]:checked');
+  return opcion ? opcion.value === 'si' : null;
+}
+
 function limpiarErrores() {
-  ['nombre', 'telefono'].forEach((campo) => {
+  ['nombre', 'telefono', 'pagado'].forEach((campo) => {
     $(`#campo-${campo}`).removeAttribute('aria-invalid');
     $(`#error-${campo}`).hidden = true;
   });
@@ -345,19 +376,24 @@ function abrirNumero(numero) {
   }
 }
 
-function marcarEstado(vendido) {
+function marcarEstado(boleto) {
+  const vendido = boleto.vendido;
   const etiqueta = $('#dialogo-estado');
   etiqueta.textContent = vendido ? 'Vendido' : 'Libre';
   etiqueta.classList.toggle('dialogo__estado--vendido', vendido);
   $('#dialogo-ficha').classList.toggle('ficha--libre', !vendido);
+  $('#dialogo-ficha').classList.toggle('ficha--debe', vendido && !boleto.pagado);
 }
 
 function mostrarFormulario(modo, boleto) {
   estado.modoFormulario = modo;
-  marcarEstado(boleto.vendido);
+  marcarEstado(boleto);
 
   $('#detalle').hidden = true;
   $('#form-comprador').hidden = false;
+  document.querySelectorAll('input[name="pagado"]').forEach((opcion) => {
+    opcion.checked = false;
+  });
 
   if (modo === 'vender') {
     $('#form-ayuda').textContent = `Anote los datos de quien compra el número ${boleto.numero}.`;
@@ -365,21 +401,35 @@ function mostrarFormulario(modo, boleto) {
     $('#campo-nombre').value = '';
     $('#campo-telefono').value = '';
   } else {
-    $('#form-ayuda').textContent = 'Corrija el nombre o el teléfono y guarde los cambios.';
+    $('#form-ayuda').textContent = 'Corrija los datos y guarde los cambios.';
     $('#boton-guardar-texto').textContent = 'Guardar cambios';
     $('#campo-nombre').value = boleto.nombre || '';
     $('#campo-telefono').value = formatearTelefono(boleto.telefono);
+    document.querySelector(`input[name="pagado"][value="${boleto.pagado ? 'si' : 'no'}"]`).checked = true;
   }
 }
 
 function mostrarDetalle(boleto) {
-  marcarEstado(true);
+  marcarEstado(boleto);
   $('#form-comprador').hidden = true;
   $('#detalle').hidden = false;
   $('#confirmar-anular').hidden = true;
 
   $('#detalle-nombre').textContent = boleto.nombre || '—';
   $('#detalle-telefono').textContent = formatearTelefono(boleto.telefono);
+
+  const pago = $('#detalle-pago');
+  pago.className = `etiqueta-pago etiqueta-pago--${boleto.pagado ? 'si' : 'no'}`;
+  pago.replaceChildren(
+    icono(boleto.pagado ? 'check' : 'clock'),
+    crear('span', null, boleto.pagado ? 'Ya pagó' : `Falta pagar ${formatearPesos(estado.precio)}`)
+  );
+  const botonPago = $('#boton-cambiar-pago');
+  botonPago.classList.toggle('boton--verde', !boleto.pagado);
+  botonPago.classList.toggle('boton--secundario', boleto.pagado);
+  $('#boton-cambiar-pago-texto').textContent = boleto.pagado
+    ? 'Marcar que todavía no ha pagado'
+    : 'Ya pagó: marcar como pagado';
   $('#detalle-fecha').textContent = formatearFecha(boleto.fechaVenta);
   $('#detalle-llamar').href = enlaceLlamar(boleto.telefono);
   $('#detalle-whatsapp').href = enlaceWhatsApp(boleto, false);
@@ -425,9 +475,16 @@ async function enviarFormulario(evento) {
     mostrarErrorCampo('telefono', 'El teléfono parece incompleto. Ejemplo: 300 123 4567.');
     valido = false;
   }
+  const pagado = pagoElegido();
+  if (pagado === null) {
+    mostrarErrorCampo('pagado', 'Elija si ya pagó o si queda debiendo.');
+    valido = false;
+  }
   if (!valido) {
     const primerError = document.querySelector('#form-comprador [aria-invalid="true"]');
-    if (primerError) primerError.focus();
+    if (primerError) {
+      (primerError.matches('input') ? primerError : primerError.querySelector('input')).focus();
+    }
     return;
   }
 
@@ -443,7 +500,7 @@ async function enviarFormulario(evento) {
   try {
     const datos = await api(`/api/boletos/${numero}/venta`, {
       metodo: esVenta ? 'POST' : 'PUT',
-      cuerpo: { nombre, telefono },
+      cuerpo: { nombre, telefono, pagado },
     });
     estado.guardando = false;
     actualizarBoletoLocal(datos.boleto);
@@ -451,7 +508,8 @@ async function enviarFormulario(evento) {
     resaltarNumero(numero);
     notificar(
       esVenta
-        ? `Número ${numero} vendido a ${datos.boleto.nombre}.`
+        ? `Número ${numero} vendido a ${datos.boleto.nombre}` +
+            (datos.boleto.pagado ? ' (pagado).' : ' (queda debiendo).')
         : `Datos del número ${numero} actualizados.`
     );
   } catch (error) {
@@ -469,6 +527,36 @@ async function enviarFormulario(evento) {
   } finally {
     boton.disabled = false;
     $('#boton-guardar-texto').textContent = textoOriginal;
+  }
+}
+
+async function cambiarPago() {
+  const boleto = buscarBoleto(estado.seleccionado);
+  if (!boleto || !boleto.vendido || estado.guardando) return;
+  const boton = $('#boton-cambiar-pago');
+  const nuevoEstado = !boleto.pagado;
+  estado.guardando = true;
+  boton.disabled = true;
+
+  try {
+    const datos = await api(`/api/boletos/${boleto.numero}/pago`, {
+      metodo: 'PATCH',
+      cuerpo: { pagado: nuevoEstado },
+    });
+    estado.guardando = false;
+    actualizarBoletoLocal(datos.boleto);
+    mostrarDetalle(datos.boleto);
+    notificar(
+      nuevoEstado
+        ? `${datos.boleto.nombre} ya pagó el número ${boleto.numero}.`
+        : `El número ${boleto.numero} quedó marcado como pendiente de pago.`
+    );
+  } catch (error) {
+    estado.guardando = false;
+    notificar(error.message, true);
+    await cargarBoletos({ silencioso: true });
+  } finally {
+    boton.disabled = false;
   }
 }
 
@@ -521,6 +609,12 @@ function mostrarGanador(numero) {
       fila.appendChild(crear('dd', null, valor));
       datos.appendChild(fila);
     });
+    const filaPago = crear('div');
+    filaPago.appendChild(crear('dt', null, 'Pago del boleto'));
+    const ddPago = crear('dd');
+    ddPago.appendChild(etiquetaPago(boleto.pagado));
+    filaPago.appendChild(ddPago);
+    datos.appendChild(filaPago);
     tarjeta.appendChild(datos);
 
     const acciones = crear('div', 'acciones');
@@ -971,6 +1065,7 @@ function registrarEventos() {
       document.querySelector('[data-accion="anular"]').focus();
     }
     if (accion === 'cancelar-anular') $('#confirmar-anular').hidden = true;
+    if (accion === 'cambiar-pago') cambiarPago();
     if (accion === 'anular') anularVenta();
   });
 
@@ -992,6 +1087,15 @@ function registrarEventos() {
   $('#form-ganador').addEventListener('submit', enviarGanador);
   $('#form-pin').addEventListener('submit', enviarPin);
   $('#buscar').addEventListener('input', renderizarCompradores);
+  document.querySelectorAll('input[name="filtro-pago"]').forEach((opcion) => {
+    opcion.addEventListener('change', renderizarCompradores);
+  });
+  document.querySelectorAll('input[name="pagado"]').forEach((opcion) => {
+    opcion.addEventListener('change', () => {
+      $('#campo-pagado').removeAttribute('aria-invalid');
+      $('#error-pagado').hidden = true;
+    });
+  });
   $('#enlace-exportar').addEventListener('click', descargarLista);
   $('#boton-historia').addEventListener('click', descargarHistoria);
 

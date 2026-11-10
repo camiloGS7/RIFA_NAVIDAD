@@ -34,6 +34,8 @@
       <symbol id="i-gift" viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C10 3 12 8 12 8s2-5 4.5-5a2.5 2.5 0 0 1 0 5"/></symbol>
       <symbol id="i-ticket" viewBox="0 0 24 24"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></symbol>
       <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+      <symbol id="i-cash" viewBox="0 0 24 24"><rect width="20" height="12" x="2" y="6" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/></symbol>
       <symbol id="i-image" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/></symbol>
       <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></symbol>
     </defs>
@@ -111,6 +113,10 @@
         <span class="resumen__etiqueta">Dinero recogido</span>
         <strong class="resumen__valor" id="res-recaudado">$0</strong>
       </div>
+      <div class="resumen__tarjeta resumen__tarjeta--deuda">
+        <span class="resumen__etiqueta">Falta por cobrar <span class="resumen__detalle" id="res-pendientes"></span></span>
+        <strong class="resumen__valor" id="res-por-cobrar">$0</strong>
+      </div>
       <div class="progreso" aria-hidden="true">
         <div class="progreso__barra" id="res-barra"></div>
       </div>
@@ -137,7 +143,8 @@
 
       <ul class="leyenda" aria-label="Significado de los colores">
         <li><span class="muestra muestra--libre" aria-hidden="true">07</span> Libre</li>
-        <li><span class="muestra muestra--vendido" aria-hidden="true"><svg class="icono"><use href="#i-check"/></svg></span> Vendido</li>
+        <li><span class="muestra muestra--vendido" aria-hidden="true"><svg class="icono"><use href="#i-check"/></svg></span> Vendido y pagado</li>
+        <li><span class="muestra muestra--debe" aria-hidden="true"><svg class="icono"><use href="#i-clock"/></svg></span> Vendido, falta pagar</li>
       </ul>
 
       <div id="grilla-cargando" class="cargando" role="status">
@@ -167,6 +174,15 @@
           <input id="buscar" type="search" class="campo__entrada" autocomplete="off" placeholder="Ejemplo: María o 25" />
         </div>
       </div>
+
+      <fieldset class="filtro">
+        <legend class="campo__etiqueta">Mostrar</legend>
+        <div class="filtro__opciones">
+          <label class="filtro__opcion"><input type="radio" name="filtro-pago" value="todos" checked /><span>Todos</span></label>
+          <label class="filtro__opcion"><input type="radio" name="filtro-pago" value="pagados" /><span>Ya pagaron</span></label>
+          <label class="filtro__opcion"><input type="radio" name="filtro-pago" value="deben" /><span>Deben</span></label>
+        </div>
+      </fieldset>
 
       <ul id="lista-compradores" class="lista"></ul>
       <p id="lista-vacia" class="vacio" hidden></p>
@@ -231,6 +247,23 @@
         <p class="campo__error" id="error-telefono" hidden></p>
       </div>
 
+      <fieldset class="campo pago" id="campo-pagado" aria-describedby="error-pagado">
+        <legend class="campo__etiqueta">¿Ya pagó el boleto (<span data-precio>$10.000</span>)?</legend>
+        <div class="pago__opciones">
+          <label class="pago__opcion pago__opcion--si">
+            <input type="radio" name="pagado" value="si" />
+            <svg class="icono" aria-hidden="true"><use href="#i-check"/></svg>
+            <span>Sí, ya pagó</span>
+          </label>
+          <label class="pago__opcion pago__opcion--no">
+            <input type="radio" name="pagado" value="no" />
+            <svg class="icono" aria-hidden="true"><use href="#i-clock"/></svg>
+            <span>No, queda debiendo</span>
+          </label>
+        </div>
+        <p class="campo__error" id="error-pagado" hidden></p>
+      </fieldset>
+
       <p class="campo__error campo__error--general" id="error-general" role="alert" hidden></p>
 
       <div class="acciones">
@@ -247,8 +280,14 @@
       <dl class="datos">
         <div><dt>Comprador</dt><dd id="detalle-nombre">—</dd></div>
         <div><dt>Teléfono</dt><dd id="detalle-telefono">—</dd></div>
+        <div><dt>Pago</dt><dd><span class="etiqueta-pago" id="detalle-pago">—</span></dd></div>
         <div><dt>Fecha de venta</dt><dd id="detalle-fecha">—</dd></div>
       </dl>
+
+      <button type="button" class="boton boton--pago" id="boton-cambiar-pago" data-accion="cambiar-pago">
+        <svg class="icono" aria-hidden="true"><use href="#i-cash"/></svg>
+        <span id="boton-cambiar-pago-texto">Marcar como pagado</span>
+      </button>
 
       <div class="acciones acciones--contacto">
         <a class="boton boton--primario" id="detalle-llamar" href="#">

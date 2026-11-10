@@ -19,12 +19,14 @@ La interfaz está diseñada para ser utilizada sin capacitación previa por pers
 
 ## Funcionalidades
 
-- **Talonario interactivo.** Cuadrícula de 100 números con estado visible (libre o vendido). Al seleccionar un número libre se abre un formulario con los campos *Nombre completo* y *Teléfono celular*; ambos son obligatorios.
-- **Detalle de venta.** Al seleccionar un número vendido se muestran el comprador, el teléfono y la fecha de venta, con accesos directos para llamar o escribir por WhatsApp.
+- **Talonario interactivo.** Cuadrícula de 100 números con tres estados visibles: libre, vendido y pagado, y vendido con pago pendiente. Cada estado se distingue por color e icono. Al seleccionar un número libre se abre un formulario con *Nombre completo*, *Teléfono celular* y la indicación de si el comprador *ya pagó* o *queda debiendo*; los tres datos son obligatorios.
+- **Detalle de venta.** Al seleccionar un número vendido se muestran el comprador, el teléfono, el estado de pago y la fecha de venta, con accesos directos para llamar o escribir por WhatsApp.
+- **Control de pagos.** Desde el detalle de cada número puede marcarse el boleto como pagado o pendiente con un solo botón. El resumen distingue el dinero recogido del dinero por cobrar.
 - **Corrección y anulación.** Los datos de un comprador pueden corregirse; una venta puede anularse previa confirmación explícita, dejando el número disponible.
-- **Lista de compradores.** Búsqueda por nombre, número o teléfono, y descarga de la lista completa en formato CSV compatible con Excel.
-- **Consulta del ganador.** Al ingresar las dos cifras ganadoras se muestra el comprador correspondiente con opciones de contacto inmediato y un mensaje de felicitación prellenado para WhatsApp.
-- **Resumen de ventas.** Números vendidos, disponibles y dinero recaudado, con barra de progreso.
+- **Lista de compradores.** Búsqueda por nombre, número o teléfono, filtro por estado de pago (todos, ya pagaron, deben) y descarga de la lista completa en formato CSV compatible con Excel.
+- **Consulta del ganador.** Al ingresar las dos cifras ganadoras se muestra el comprador correspondiente, su estado de pago y opciones de contacto inmediato y un mensaje de felicitación prellenado para WhatsApp.
+- **Resumen de ventas.** Números vendidos y disponibles, dinero recogido y dinero pendiente de cobro, con barra de progreso.
+- **Imagen para historias de Instagram.** Genera un PNG de 1080 × 1920 px con el estado del talonario, respetando los márgenes superior e inferior que ocupa la interfaz de Instagram. No incluye datos de los compradores.
 - **Trabajo simultáneo.** La venta se registra mediante una operación atómica en la base de datos, de modo que dos vendedores no pueden vender el mismo número. La vista se actualiza automáticamente cada 20 segundos.
 - **Acceso protegido (opcional).** Si se define `ADMIN_PIN`, la aplicación solicita el PIN una vez por dispositivo y la API rechaza cualquier solicitud que no lo incluya. Esto protege los nombres y teléfonos de los compradores.
 
@@ -73,9 +75,10 @@ Tabla `boletos_rifa`:
 | `nombre_comprador` | `VARCHAR(150)` | Nombre del comprador; `NULL` si está disponible |
 | `telefono` | `VARCHAR(20)` | Teléfono del comprador, almacenado solo con dígitos |
 | `estado` | `BOOLEAN` | `FALSE` disponible, `TRUE` vendido |
+| `pagado` | `BOOLEAN` | `TRUE` cuando el comprador ya pagó el boleto |
 | `fecha_venta` | `TIMESTAMPTZ` | Fecha y hora del registro de la venta |
 
-Al iniciar, el servidor crea la tabla si no existe, agrega la columna `telefono` en instalaciones anteriores e inserta los 100 números faltantes. Todas las operaciones son idempotentes y no alteran las ventas registradas. El archivo `db/init.sql` contiene el mismo esquema para quien prefiera aprovisionar la base manualmente desde la consola de Neon.
+Al iniciar, el servidor crea la tabla si no existe, agrega las columnas `telefono` y `pagado` en instalaciones anteriores e inserta los 100 números faltantes. Todas las operaciones son idempotentes y no alteran las ventas registradas. El archivo `db/init.sql` contiene el mismo esquema para quien prefiera aprovisionar la base manualmente desde la consola de Neon.
 
 ---
 
@@ -90,8 +93,9 @@ Todas las respuestas son JSON con el campo `ok`. Cuando `ADMIN_PIN` está defini
 | `POST` | `/api/sesion` | Verifica un PIN. Cuerpo: `{ "pin": "1234" }` |
 | `GET` | `/api/boletos` | Lista de los 100 boletos y resumen de ventas |
 | `GET` | `/api/boletos/exportar` | Compradores en formato CSV |
-| `POST` | `/api/boletos/:numero/venta` | Registra una venta. Cuerpo: `{ "nombre": "...", "telefono": "..." }` |
-| `PUT` | `/api/boletos/:numero/venta` | Corrige nombre o teléfono de un boleto vendido |
+| `POST` | `/api/boletos/:numero/venta` | Registra una venta. Cuerpo: `{ "nombre": "...", "telefono": "...", "pagado": true }` |
+| `PUT` | `/api/boletos/:numero/venta` | Corrige nombre, teléfono o estado de pago de un boleto vendido |
+| `PATCH` | `/api/boletos/:numero/pago` | Marca el boleto como pagado o pendiente. Cuerpo: `{ "pagado": true }` |
 | `DELETE` | `/api/boletos/:numero/venta` | Anula la venta y libera el número |
 
 ### Validaciones
@@ -99,6 +103,7 @@ Todas las respuestas son JSON con el campo `ok`. Cuando `ADMIN_PIN` está defini
 - `numero`: exactamente dos dígitos.
 - `nombre`: entre 3 y 100 caracteres; se eliminan espacios redundantes y caracteres de control.
 - `telefono`: entre 7 y 15 dígitos; se aceptan espacios, guiones y prefijo `+57`, y se almacenan únicamente los dígitos.
+- `pagado`: valor booleano obligatorio al registrar o corregir una venta.
 
 ### Códigos de respuesta
 

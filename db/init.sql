@@ -13,11 +13,13 @@ CREATE TABLE IF NOT EXISTS boletos_rifa (
     nombre_comprador VARCHAR(150) DEFAULT NULL,
     telefono         VARCHAR(20)  DEFAULT NULL,          -- Solo digitos
     estado           BOOLEAN      NOT NULL DEFAULT FALSE, -- FALSE = disponible, TRUE = vendido
+    pagado           BOOLEAN      NOT NULL DEFAULT FALSE, -- TRUE cuando el comprador ya pago
     fecha_venta      TIMESTAMPTZ  DEFAULT NULL
 );
 
--- Migracion para bases creadas con la version anterior (sin telefono).
+-- Migraciones para bases creadas con versiones anteriores.
 ALTER TABLE boletos_rifa ADD COLUMN IF NOT EXISTS telefono VARCHAR(20) DEFAULT NULL;
+ALTER TABLE boletos_rifa ADD COLUMN IF NOT EXISTS pagado BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- Poblar los 100 numeros: del '01' al '99' y finalmente el '00'.
 INSERT INTO boletos_rifa (numero)
