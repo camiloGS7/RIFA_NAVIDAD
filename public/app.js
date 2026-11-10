@@ -596,6 +596,271 @@ async function descargarLista(evento) {
   }
 }
 
+/* ------------------------------ Imagen para historia ------------------------------ */
+
+/**
+ * Formato de historia de Instagram: 1080 x 1920 px (9:16).
+ * Se dejan libres ~250 px arriba y abajo, donde Instagram superpone
+ * el nombre de la cuenta y la barra de respuesta.
+ */
+const HISTORIA = { ancho: 1080, alto: 1920, zonaSegura: 250 };
+
+function cargarImagen(src) {
+  return new Promise((resolver, rechazar) => {
+    const imagen = new Image();
+    imagen.onload = () => resolver(imagen);
+    imagen.onerror = rechazar;
+    imagen.src = src;
+  });
+}
+
+function trazarRectangulo(ctx, x, y, ancho, alto, radio) {
+  ctx.beginPath();
+  ctx.moveTo(x + radio, y);
+  ctx.arcTo(x + ancho, y, x + ancho, y + alto, radio);
+  ctx.arcTo(x + ancho, y + alto, x, y + alto, radio);
+  ctx.arcTo(x, y + alto, x, y, radio);
+  ctx.arcTo(x, y, x + ancho, y, radio);
+  ctx.closePath();
+}
+
+function dibujarCasilla(ctx, x, y, lado, numero, vendido) {
+  trazarRectangulo(ctx, x, y, lado, lado, 14);
+  ctx.fillStyle = vendido ? '#5E0E14' : '#FFFFFF';
+  ctx.fill();
+  if (vendido) {
+    ctx.strokeStyle = 'rgba(201, 149, 43, 0.85)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = vendido ? 'rgba(255, 255, 255, 0.38)' : '#24160F';
+  ctx.font = '700 40px "Atkinson Hyperlegible", system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(numero, x + lado / 2, y + lado / 2 + 2);
+
+  if (vendido) {
+    // Tachado dorado, como un número tachado en el talonario.
+    ctx.strokeStyle = '#E2B04A';
+    ctx.lineWidth = 6;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x + 16, y + lado - 16);
+    ctx.lineTo(x + lado - 16, y + 16);
+    ctx.stroke();
+  }
+}
+
+async function generarImagenHistoria() {
+  const { ancho, alto } = HISTORIA;
+
+  await Promise.all([
+    document.fonts.load('800 150px "Fraunces"'),
+    document.fonts.load('700 40px "Atkinson Hyperlegible"'),
+    document.fonts.load('400 40px "Atkinson Hyperlegible"'),
+  ]).catch(() => {});
+  const foto = await cargarImagen('/img/reno-premio.jpg').catch(() => null);
+
+  const lienzo = document.createElement('canvas');
+  lienzo.width = ancho;
+  lienzo.height = alto;
+  const ctx = lienzo.getContext('2d');
+
+  // Fondo
+  const fondo = ctx.createLinearGradient(0, 0, 0, alto);
+  fondo.addColorStop(0, '#B3242E');
+  fondo.addColorStop(0.55, '#A3202A');
+  fondo.addColorStop(1, '#6E1118');
+  ctx.fillStyle = fondo;
+  ctx.fillRect(0, 0, ancho, alto);
+
+  const brillo = ctx.createRadialGradient(170, 140, 0, 170, 140, 760);
+  brillo.addColorStop(0, 'rgba(201, 149, 43, 0.38)');
+  brillo.addColorStop(1, 'rgba(201, 149, 43, 0)');
+  ctx.fillStyle = brillo;
+  ctx.fillRect(0, 0, ancho, alto);
+
+  // Destellos (semilla fija para que la imagen sea siempre igual)
+  let semilla = 11;
+  const azar = () => {
+    semilla = (semilla * 9301 + 49297) % 233280;
+    return semilla / 233280;
+  };
+  for (let i = 0; i < 80; i++) {
+    ctx.fillStyle = `rgba(255, 236, 185, ${0.12 + azar() * 0.45})`;
+    ctx.beginPath();
+    ctx.arc(azar() * ancho, azar() * alto, 1.5 + azar() * 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Guirnalda de luces (zona superior, solo decorativa)
+  ctx.save();
+  ctx.shadowColor = 'rgba(255, 220, 130, 0.95)';
+  ctx.shadowBlur = 26;
+  ctx.fillStyle = '#FFE7A3';
+  for (let x = 30; x < ancho; x += 64) {
+    ctx.beginPath();
+    ctx.arc(x, 70 + Math.sin(x / 95) * 22, 9, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // Títulos
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = '#F6E7C1';
+  ctx.font = '700 46px "Atkinson Hyperlegible", system-ui, sans-serif';
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '14px';
+  ctx.fillText('GRAN RIFA', ancho / 2 + 7, 288);
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(255, 214, 120, 0.55)';
+  ctx.shadowBlur = 30;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = '800 150px "Fraunces", Georgia, serif';
+  ctx.fillText('Navideña', ancho / 2, 418);
+  ctx.restore();
+
+  // Cuadrícula 10 x 10
+  const lado = 86;
+  const hueco = 6;
+  const anchoGrilla = lado * 10 + hueco * 9;
+  const x0 = (ancho - anchoGrilla) / 2;
+  const y0 = 458;
+
+  trazarRectangulo(ctx, x0 - 16, y0 - 16, anchoGrilla + 32, anchoGrilla + 32, 30);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(246, 231, 193, 0.65)';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  estado.boletos.forEach((boleto, i) => {
+    const x = x0 + (i % 10) * (lado + hueco);
+    const y = y0 + Math.floor(i / 10) * (lado + hueco);
+    dibujarCasilla(ctx, x, y, lado, boleto.numero, boleto.vendido);
+  });
+
+  // Leyenda y números disponibles
+  const yLeyenda = y0 + anchoGrilla + 40;
+  const disponibles = estado.boletos.filter((b) => !b.vendido).length;
+
+  dibujarCasilla(ctx, x0, yLeyenda, 40, '', false);
+  dibujarCasilla(ctx, x0 + 170, yLeyenda, 40, '', true);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = '700 32px "Atkinson Hyperlegible", system-ui, sans-serif';
+  ctx.fillText('Libre', x0 + 54, yLeyenda + 21);
+  ctx.fillText('Vendido', x0 + 224, yLeyenda + 21);
+
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#FFD978';
+  ctx.font = '700 36px "Atkinson Hyperlegible", system-ui, sans-serif';
+  ctx.fillText(
+    disponibles === 0
+      ? '¡Todos vendidos!'
+      : `¡Quedan ${disponibles} ${disponibles === 1 ? 'número' : 'números'}!`,
+    x0 + anchoGrilla,
+    yLeyenda + 21
+  );
+
+  // Premio, precio y sorteo (termina antes de la zona inferior reservada)
+  const yInfo = yLeyenda + 76;
+  const ladoFoto = 176;
+  trazarRectangulo(ctx, x0, yInfo, ladoFoto, ladoFoto, 20);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fill();
+  if (foto) {
+    ctx.save();
+    trazarRectangulo(ctx, x0 + 6, yInfo + 6, ladoFoto - 12, ladoFoto - 12, 15);
+    ctx.clip();
+    const escala = Math.max((ladoFoto - 12) / foto.width, (ladoFoto - 12) / foto.height);
+    const w = foto.width * escala;
+    const h = foto.height * escala;
+    ctx.drawImage(foto, x0 + 6 + (ladoFoto - 12 - w) / 2, yInfo + 6 + (ladoFoto - 12 - h) / 2, w, h);
+    ctx.restore();
+  }
+
+  const xTexto = x0 + ladoFoto + 36;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+
+  ctx.fillStyle = '#F6E7C1';
+  ctx.font = '400 30px "Atkinson Hyperlegible", system-ui, sans-serif';
+  ctx.fillText('Premio: reno navideño de 82 × 40 cm', xTexto, yInfo + 30);
+
+  ctx.fillStyle = '#FFD978';
+  ctx.font = '800 64px "Fraunces", Georgia, serif';
+  const precio = formatearPesos(estado.precio);
+  ctx.fillText(precio, xTexto, yInfo + 100);
+  const anchoPrecio = ctx.measureText(precio).width;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = '700 34px "Atkinson Hyperlegible", system-ui, sans-serif';
+  ctx.fillText('por boleto', xTexto + anchoPrecio + 16, yInfo + 98);
+
+  ctx.font = '700 34px "Atkinson Hyperlegible", system-ui, sans-serif';
+  ctx.fillText('Sorteo: 12 de diciembre', xTexto, yInfo + 144);
+  ctx.fillStyle = '#F6E7C1';
+  ctx.font = '400 28px "Atkinson Hyperlegible", system-ui, sans-serif';
+  ctx.fillText('Últimas 2 cifras de la Lotería de Boyacá', xTexto, yInfo + 180);
+
+  return new Promise((resolver) => lienzo.toBlob(resolver, 'image/png'));
+}
+
+function guardarArchivo(blob, nombre) {
+  const url = URL.createObjectURL(blob);
+  const enlace = crear('a');
+  enlace.href = url;
+  enlace.download = nombre;
+  document.body.appendChild(enlace);
+  enlace.click();
+  enlace.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+async function descargarHistoria() {
+  const boton = $('#boton-historia');
+  const texto = $('#boton-historia-texto');
+  if (boton.disabled) return;
+  if (estado.boletos.length === 0) {
+    notificar('Espere a que carguen los números e intente de nuevo.', true);
+    return;
+  }
+
+  const nombre = 'rifa-navidena-historia.png';
+  boton.disabled = true;
+  texto.textContent = 'Creando imagen…';
+
+  try {
+    const blob = await generarImagenHistoria();
+    if (!blob) throw new Error('sin imagen');
+
+    // En el celular se abre el menú de compartir: desde ahí se puede
+    // "Guardar imagen" en la galería o enviarla directo a Instagram.
+    const archivo = new File([blob], nombre, { type: 'image/png' });
+    const esCelular = window.matchMedia('(pointer: coarse)').matches;
+    if (esCelular && navigator.canShare && navigator.canShare({ files: [archivo] })) {
+      try {
+        await navigator.share({ files: [archivo], title: 'Gran Rifa Navideña' });
+        return;
+      } catch (error) {
+        if (error.name === 'AbortError') return;
+      }
+    }
+
+    guardarArchivo(blob, nombre);
+    notificar('Imagen descargada. Ya puede subirla a su historia de Instagram.');
+  } catch (error) {
+    notificar('No se pudo crear la imagen. Intente de nuevo.', true);
+  } finally {
+    boton.disabled = false;
+    texto.textContent = 'Imagen para historia';
+  }
+}
+
 /* ------------------------------ PIN ------------------------------ */
 
 function mostrarPantallaPin() {
@@ -728,6 +993,7 @@ function registrarEventos() {
   $('#form-pin').addEventListener('submit', enviarPin);
   $('#buscar').addEventListener('input', renderizarCompradores);
   $('#enlace-exportar').addEventListener('click', descargarLista);
+  $('#boton-historia').addEventListener('click', descargarHistoria);
 
   $('#numero-ganador').addEventListener('input', (e) => {
     e.target.value = e.target.value.replace(/\D/g, '').slice(0, 2);

@@ -404,9 +404,24 @@ main {
   margin-bottom: 4px;
 }
 
+.botonera {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
 @media (max-width: 560px) {
   .vista__encabezado {
     flex-direction: column;
+  }
+
+  .botonera {
+    width: 100%;
+  }
+
+  #boton-historia {
+    flex: 1;
   }
 }
 
