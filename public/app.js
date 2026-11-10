@@ -1,10 +1,25 @@
 'use strict';
 
 /* ==========================================================================
-   Gran Rifa Navideña — Lógica del cliente
+   Lógica del cliente. Los textos propios de la rifa están en rifa.config.js.
    ========================================================================== */
 
-const CLAVE_PIN = 'rifa-navidena-pin';
+const RIFA = Object.assign(
+  {
+    antetitulo: 'Gran Rifa',
+    titulo: '',
+    nombreCompleto: 'Rifa',
+    premio: '',
+    fotoPremio: '',
+    fotoPremioDescripcion: 'Foto del premio',
+    fechaSorteo: '',
+    loteria: '',
+    identificador: 'rifa',
+  },
+  window.RIFA || {}
+);
+
+const CLAVE_PIN = `${RIFA.identificador}-pin`;
 const INTERVALO_ACTUALIZACION = 20000;
 
 const estado = {
@@ -80,8 +95,8 @@ function enlaceLlamar(digitos) {
 function enlaceWhatsApp(boleto, esGanador) {
   const base = `https://wa.me/${telefonoWhatsApp(boleto.telefono)}`;
   const texto = esGanador
-    ? `Hola ${boleto.nombre}, le escribimos de la Gran Rifa Navideña. ¡Felicitaciones! Su número ${boleto.numero} resultó ganador del sorteo. Comuníquese con nosotros para entregarle el premio.`
-    : `Hola ${boleto.nombre}, le escribimos de la Gran Rifa Navideña sobre su número ${boleto.numero}.`;
+    ? `Hola ${boleto.nombre}, le escribimos de la ${RIFA.nombreCompleto}. ¡Felicitaciones! Su número ${boleto.numero} resultó ganador del sorteo. Comuníquese con nosotros para entregarle el premio.`
+    : `Hola ${boleto.nombre}, le escribimos de la ${RIFA.nombreCompleto} sobre su número ${boleto.numero}.`;
   return `${base}?text=${encodeURIComponent(texto)}`;
 }
 
@@ -680,7 +695,7 @@ async function descargarLista(evento) {
     const url = URL.createObjectURL(archivo);
     const enlace = crear('a');
     enlace.href = url;
-    enlace.download = 'compradores-rifa.csv';
+    enlace.download = `compradores-${RIFA.identificador}.csv`;
     document.body.appendChild(enlace);
     enlace.click();
     enlace.remove();
@@ -754,7 +769,7 @@ async function generarImagenHistoria() {
     document.fonts.load('700 40px "Atkinson Hyperlegible"'),
     document.fonts.load('400 40px "Atkinson Hyperlegible"'),
   ]).catch(() => {});
-  const foto = await cargarImagen('/img/reno-premio.jpg').catch(() => null);
+  const foto = RIFA.fotoPremio ? await cargarImagen(RIFA.fotoPremio).catch(() => null) : null;
 
   const lienzo = document.createElement('canvas');
   lienzo.width = ancho;
@@ -804,17 +819,17 @@ async function generarImagenHistoria() {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = '#F6E7C1';
-  ctx.font = '700 46px "Atkinson Hyperlegible", system-ui, sans-serif';
   if ('letterSpacing' in ctx) ctx.letterSpacing = '14px';
-  ctx.fillText('GRAN RIFA', ancho / 2 + 7, 288);
+  ajustarFuente(ctx, RIFA.antetitulo.toUpperCase(), 700, 46, '"Atkinson Hyperlegible", system-ui, sans-serif', 960);
+  ctx.fillText(RIFA.antetitulo.toUpperCase(), ancho / 2 + 7, 288);
   if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
 
   ctx.save();
   ctx.shadowColor = 'rgba(255, 214, 120, 0.55)';
   ctx.shadowBlur = 30;
   ctx.fillStyle = '#FFFFFF';
-  ctx.font = '800 150px "Fraunces", Georgia, serif';
-  ctx.fillText('Navideña', ancho / 2, 418);
+  ajustarFuente(ctx, RIFA.titulo, 800, 150, '"Fraunces", Georgia, serif', 960);
+  ctx.fillText(RIFA.titulo, ancho / 2, 418);
   ctx.restore();
 
   // Cuadrícula 10 x 10
@@ -879,12 +894,15 @@ async function generarImagenHistoria() {
   }
 
   const xTexto = x0 + ladoFoto + 36;
+  const anchoTexto = x0 + anchoGrilla - xTexto;
+  const sansSerif = '"Atkinson Hyperlegible", system-ui, sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
 
+  const textoPremio = `Premio: ${RIFA.premio}`;
   ctx.fillStyle = '#F6E7C1';
-  ctx.font = '400 30px "Atkinson Hyperlegible", system-ui, sans-serif';
-  ctx.fillText('Premio: reno navideño de 82 × 40 cm', xTexto, yInfo + 30);
+  ajustarFuente(ctx, textoPremio, 400, 30, sansSerif, anchoTexto);
+  ctx.fillText(textoPremio, xTexto, yInfo + 30);
 
   ctx.fillStyle = '#FFD978';
   ctx.font = '800 64px "Fraunces", Georgia, serif';
@@ -895,13 +913,26 @@ async function generarImagenHistoria() {
   ctx.font = '700 34px "Atkinson Hyperlegible", system-ui, sans-serif';
   ctx.fillText('por boleto', xTexto + anchoPrecio + 16, yInfo + 98);
 
-  ctx.font = '700 34px "Atkinson Hyperlegible", system-ui, sans-serif';
-  ctx.fillText('Sorteo: 12 de diciembre', xTexto, yInfo + 144);
+  const textoFecha = `Sorteo: ${RIFA.fechaSorteo}`;
+  ajustarFuente(ctx, textoFecha, 700, 34, sansSerif, anchoTexto);
+  ctx.fillText(textoFecha, xTexto, yInfo + 144);
+
+  const textoLoteria = `Últimas 2 cifras de la ${RIFA.loteria}`;
   ctx.fillStyle = '#F6E7C1';
-  ctx.font = '400 28px "Atkinson Hyperlegible", system-ui, sans-serif';
-  ctx.fillText('Últimas 2 cifras de la Lotería de Boyacá', xTexto, yInfo + 180);
+  ajustarFuente(ctx, textoLoteria, 400, 28, sansSerif, anchoTexto);
+  ctx.fillText(textoLoteria, xTexto, yInfo + 180);
 
   return new Promise((resolver) => lienzo.toBlob(resolver, 'image/png'));
+}
+
+/** Reduce el tamaño de letra hasta que el texto quepa en el ancho indicado. */
+function ajustarFuente(ctx, texto, peso, tamano, familia, anchoMaximo) {
+  let actual = tamano;
+  ctx.font = `${peso} ${actual}px ${familia}`;
+  while (actual > 14 && ctx.measureText(texto).width > anchoMaximo) {
+    actual -= 2;
+    ctx.font = `${peso} ${actual}px ${familia}`;
+  }
 }
 
 function guardarArchivo(blob, nombre) {
@@ -924,7 +955,7 @@ async function descargarHistoria() {
     return;
   }
 
-  const nombre = 'rifa-navidena-historia.png';
+  const nombre = `${RIFA.identificador}-historia.png`;
   boton.disabled = true;
   texto.textContent = 'Creando imagen…';
 
@@ -938,7 +969,7 @@ async function descargarHistoria() {
     const esCelular = window.matchMedia('(pointer: coarse)').matches;
     if (esCelular && navigator.canShare && navigator.canShare({ files: [archivo] })) {
       try {
-        await navigator.share({ files: [archivo], title: 'Gran Rifa Navideña' });
+        await navigator.share({ files: [archivo], title: RIFA.nombreCompleto });
         return;
       } catch (error) {
         if (error.name === 'AbortError') return;
@@ -1112,7 +1143,24 @@ function registrarEventos() {
 
 /* ------------------------------ Inicio ------------------------------ */
 
+/** Escribe en la página los textos de rifa.config.js. */
+function aplicarConfiguracion() {
+  document.querySelectorAll('[data-rifa]').forEach((nodo) => {
+    const valor = RIFA[nodo.dataset.rifa];
+    if (valor) nodo.textContent = valor;
+  });
+  const foto = $('#foto-premio');
+  if (RIFA.fotoPremio) {
+    foto.src = RIFA.fotoPremio;
+    foto.alt = RIFA.fotoPremioDescripcion;
+  }
+  document.title = RIFA.nombreCompleto;
+  const descripcion = document.querySelector('meta[name="description"]');
+  if (descripcion) descripcion.content = `Registro de ventas de la ${RIFA.nombreCompleto}.`;
+}
+
 async function iniciar() {
+  aplicarConfiguracion();
   registrarEventos();
   programarActualizacion();
 

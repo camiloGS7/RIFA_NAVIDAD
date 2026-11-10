@@ -48,16 +48,16 @@
     <div class="luces" aria-hidden="true"></div>
     <div class="contenedor cabecera__cuerpo">
       <div class="cabecera__titulo">
-        <p class="cabecera__antetitulo">Gran Rifa</p>
-        <h1>Navideña</h1>
+        <p class="cabecera__antetitulo" data-rifa="antetitulo">Gran Rifa</p>
+        <h1 data-rifa="titulo">Navideña</h1>
       </div>
 
       <div class="premio">
-        <img class="premio__foto" src="/img/reno-premio.jpg" alt="Premio: muñeco de reno navideño con suéter" width="225" height="235" />
+        <img class="premio__foto" id="foto-premio" src="/img/reno-premio.jpg" alt="Premio: muñeco de reno navideño con suéter" width="225" height="235" />
         <ul class="premio__datos">
           <li>
             <svg class="icono" aria-hidden="true"><use href="#i-gift"/></svg>
-            <span><strong>Premio:</strong> Reno navideño de 82 × 40 cm</span>
+            <span><strong>Premio:</strong> <span data-rifa="premio">Reno navideño de 82 × 40 cm</span></span>
           </li>
           <li>
             <svg class="icono" aria-hidden="true"><use href="#i-ticket"/></svg>
@@ -65,7 +65,7 @@
           </li>
           <li>
             <svg class="icono" aria-hidden="true"><use href="#i-calendar"/></svg>
-            <span><strong>Sorteo:</strong> 12 de diciembre, últimas 2 cifras de la Lotería de Boyacá</span>
+            <span><strong>Sorteo:</strong> <span data-rifa="fechaSorteo">12 de diciembre</span>, últimas 2 cifras de la <span data-rifa="loteria">Lotería de Boyacá</span></span>
           </li>
         </ul>
       </div>
@@ -193,7 +193,7 @@
       <div class="vista__encabezado">
         <div>
           <h2>Consultar ganador</h2>
-          <p class="texto-suave">Escriba las 2 últimas cifras del premio mayor de la Lotería de Boyacá.</p>
+          <p class="texto-suave">Escriba las 2 últimas cifras del premio mayor de la <span data-rifa="loteria">Lotería de Boyacá</span>.</p>
         </div>
       </div>
 
@@ -214,7 +214,7 @@
   </main>
 
   <footer class="pie contenedor">
-    <p>Gran Rifa Navideña · Sorteo el 12 de diciembre con la Lotería de Boyacá</p>
+    <p><span data-rifa="nombreCompleto">Gran Rifa Navideña</span> · Sorteo el <span data-rifa="fechaSorteo">12 de diciembre</span> con la <span data-rifa="loteria">Lotería de Boyacá</span></p>
   </footer>
 
   <!-- ===================== Ventana de número ===================== -->
@@ -342,6 +342,7 @@
     <span id="notificacion-texto"></span>
   </div>
 
+  <script src="/rifa.config.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

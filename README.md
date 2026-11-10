@@ -52,10 +52,13 @@ La interfaz está diseñada para ser utilizada sin capacitación previa por pers
 ├── db/
 │   └── init.sql         Esquema de referencia para aprovisionamiento manual
 ├── public/
+│   ├── rifa.config.js   Datos de la rifa: títulos, premio, foto, fecha y lotería
 │   ├── index.html       Estructura de la interfaz
 │   ├── styles.css       Estilos y sistema visual
 │   ├── app.js           Lógica del cliente y consumo de la API
 │   └── img/             Recursos gráficos
+├── docs/
+│   └── NUEVA-RIFA.md    Guía y prompt para montar otra rifa con el mismo diseño
 ├── .env.example         Plantilla de variables de entorno
 ├── railway.json         Configuración de construcción y despliegue en Railway
 ├── Procfile             Definición del proceso web
@@ -125,6 +128,7 @@ Todas las respuestas son JSON con el campo `ok`. Cuando `ADMIN_PIN` está defini
 | `DATABASE_URL` | Sí | Cadena de conexión de Neon DB |
 | `ADMIN_PIN` | Recomendada | PIN de acceso para vendedores. Si no se define, cualquier persona con la URL puede ver y modificar las ventas |
 | `PRECIO_BOLETO` | No | Valor del boleto en pesos. Por defecto `10000` |
+| `NOMBRE_TABLA` | No | Tabla de la base de datos. Por defecto `boletos_rifa`. Permite que varias rifas compartan una misma base de datos sin mezclar información |
 | `PORT` | No | Puerto HTTP. Railway lo asigna automáticamente |
 
 ---
@@ -149,6 +153,12 @@ La aplicación queda disponible en `http://localhost:3000`.
 2. Definir en **Variables** al menos `DATABASE_URL` y, de forma recomendada, `ADMIN_PIN`.
 3. Railway construye con Nixpacks y ejecuta `npm start` según `railway.json`. El despliegue se considera exitoso cuando `/api/health` responde.
 4. Cada `git push` a `main` genera un nuevo despliegue automáticamente.
+
+---
+
+## Reutilización para otras rifas
+
+Todos los datos propios de la rifa (títulos, premio, foto, fecha del sorteo y lotería) se definen en `public/rifa.config.js`; el valor del boleto se define con `PRECIO_BOLETO`. Para montar una rifa nueva con el mismo diseño no es necesario modificar el código. El procedimiento completo, junto con un prompt listo para usar con Claude Code, se encuentra en [`docs/NUEVA-RIFA.md`](docs/NUEVA-RIFA.md).
 
 ---
 
