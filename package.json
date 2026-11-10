@@ -1,7 +1,8 @@
 {
   "name": "gran-rifa-navidena",
-  "version": "1.0.0",
-  "description": "Aplicación web rápida para gestionar la Gran Rifa Navideña con Node.js, Express, Tailwind CSS y Neon DB (PostgreSQL)",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Sistema de registro de ventas para la Gran Rifa Navidena: talonario de 100 numeros, datos de contacto de compradores y consulta del ganador.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

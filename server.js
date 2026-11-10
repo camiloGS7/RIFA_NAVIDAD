@@ -1,244 +1,307 @@
+'use strict';
+
 require('dotenv').config();
-const express = require('express');
+
+const crypto = require('crypto');
 const path = require('path');
-const { Pool } = require('pg');
+const express = require('express');
+
+const db = require('./lib/db');
+const { validarNumero, validarComprador } = require('./lib/validacion');
+
+const PORT = Number(process.env.PORT) || 3000;
+const PRECIO_BOLETO = Number(process.env.PRECIO_BOLETO) || 10000;
+const ADMIN_PIN = (process.env.ADMIN_PIN || '').trim();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
 
-if (!process.env.DATABASE_URL) {
-  console.warn('[WARN] La variable de entorno DATABASE_URL no esta definida.');
-}
+/* -------------------------------------------------------------------------- */
+/* Middleware general                                                         */
+/* -------------------------------------------------------------------------- */
 
-/**
- * Construye la configuracion de conexion para PostgreSQL (Neon DB),
- * asegurando compatibilidad TLS con el driver pg en entornos PaaS (Railway).
- */
-function buildPoolConfig(rawUrl) {
-  if (!rawUrl) {
-    return {};
-  }
-  try {
-    const parsed = new URL(rawUrl);
-    parsed.searchParams.delete('sslmode');
-    parsed.searchParams.delete('channel_binding');
-    return {
-      connectionString: parsed.toString(),
-      ssl: { rejectUnauthorized: false },
-      max: 10,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
-    };
-  } catch (error) {
-    return {
-      connectionString: rawUrl,
-      ssl: { rejectUnauthorized: false },
-      max: 10,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
-    };
-  }
-}
-
-const pool = new Pool(buildPoolConfig(process.env.DATABASE_URL));
-
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
-
-/**
- * Inicializa automaticamente la tabla `boletos_rifa` y los 100 numeros ('01' al '99' y '00')
- * si aun no existen en Neon DB.
- */
-async function initDatabase() {
-  if (!process.env.DATABASE_URL) return;
-
-  const client = await pool.connect();
-  try {
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS boletos_rifa (
-        id SERIAL PRIMARY KEY,
-        numero VARCHAR(2) UNIQUE NOT NULL,
-        nombre_comprador VARCHAR(150) DEFAULT NULL,
-        estado BOOLEAN NOT NULL DEFAULT FALSE,
-        fecha_venta TIMESTAMP WITH TIME ZONE DEFAULT NULL
-      );
-    `);
-
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_boletos_rifa_numero ON boletos_rifa (numero);
-      CREATE INDEX IF NOT EXISTS idx_boletos_rifa_estado ON boletos_rifa (estado);
-    `);
-
-    await client.query(`
-      INSERT INTO boletos_rifa (numero, nombre_comprador, estado, fecha_venta)
-      SELECT
-        CASE
-          WHEN n = 100 THEN '00'
-          ELSE LPAD(n::TEXT, 2, '0')
-        END AS numero,
-        NULL AS nombre_comprador,
-        FALSE AS estado,
-        NULL AS fecha_venta
-      FROM generate_series(1, 100) AS n
-      ON CONFLICT (numero) DO NOTHING;
-    `);
-
-    console.log('[INFO] Base de datos verificada correctamente (100 boletos inicializados).');
-  } catch (error) {
-    console.error('[ERROR] Fallo al inicializar la base de datos:', error.message);
-  } finally {
-    client.release();
-  }
-}
-
-/**
- * GET /api/boletos
- * Obtiene los 100 numeros ordenados del '01' al '99' y terminando en '00'.
- */
-app.get('/api/boletos', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT id, numero, nombre_comprador, estado, fecha_venta
-      FROM boletos_rifa
-      ORDER BY CASE WHEN numero = '00' THEN 100 ELSE CAST(numero AS INTEGER) END ASC;
-    `);
-
-    res.json({
-      ok: true,
-      boletos: result.rows,
-    });
-  } catch (error) {
-    console.error('[ERROR] GET /api/boletos:', error.message);
-    res.status(500).json({
-      ok: false,
-      mensaje: 'Error al obtener los boletos desde la base de datos.',
-    });
-  }
+app.use((req, res, next) => {
+  res.set({
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'same-origin',
+  });
+  next();
 });
 
+app.use(express.json({ limit: '10kb' }));
+
+app.use(
+  express.static(path.join(__dirname, 'public'), {
+    setHeaders(res, rutaArchivo) {
+      if (/\.(jpg|jpeg|png|webp|svg)$/i.test(rutaArchivo)) {
+        res.set('Cache-Control', 'public, max-age=604800');
+      } else {
+        res.set('Cache-Control', 'no-cache');
+      }
+    },
+  })
+);
+
+/** Envuelve controladores asincronos para enviar los errores al manejador central. */
+const manejar = (controlador) => (req, res, next) => {
+  Promise.resolve(controlador(req, res, next)).catch(next);
+};
+
+/** Compara el PIN en tiempo constante para no filtrar informacion por tiempos de respuesta. */
+function pinCorrecto(pinRecibido) {
+  if (!ADMIN_PIN) return true;
+  const a = crypto.createHash('sha256').update(String(pinRecibido || '')).digest();
+  const b = crypto.createHash('sha256').update(ADMIN_PIN).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
 /**
- * POST /api/comprar
- * Registra la venta de un numero si esta disponible (estado = FALSE).
- * Body: { numero: "01", nombre_comprador: "Maria Perez" }
+ * Si se define ADMIN_PIN, todas las rutas de boletos exigen la cabecera
+ * `X-Admin-Pin`. Asi los nombres y telefonos de los compradores no quedan
+ * expuestos a cualquier persona que conozca la direccion.
  */
-app.post('/api/comprar', async (req, res) => {
-  try {
-    const { numero, nombre_comprador } = req.body;
-    const numeroLimpio = String(numero || '').trim();
-    const compradorLimpio = String(nombre_comprador || '').trim();
+function requierePin(req, res, next) {
+  if (pinCorrecto(req.get('X-Admin-Pin'))) return next();
+  res.status(401).json({ ok: false, mensaje: 'PIN incorrecto o no enviado.' });
+}
 
-    if (!/^\d{2}$/.test(numeroLimpio)) {
-      return res.status(400).json({
-        ok: false,
-        mensaje: 'El numero de boleto debe tener 2 digitos (01 al 99 o 00).',
-      });
-    }
+function numeroDesdeRuta(req, res) {
+  const numero = validarNumero(req.params.numero);
+  if (numero.error) {
+    res.status(400).json({ ok: false, mensaje: numero.error });
+    return null;
+  }
+  return numero.valor;
+}
 
-    if (!compradorLimpio) {
-      return res.status(400).json({
-        ok: false,
-        mensaje: 'Por favor ingresa el nombre del comprador.',
-      });
-    }
+/* -------------------------------------------------------------------------- */
+/* Rutas publicas                                                             */
+/* -------------------------------------------------------------------------- */
 
-    // Actualizacion atomica: solo actualiza si estado = FALSE (evita dobles ventas)
-    const result = await pool.query(
-      `
-      UPDATE boletos_rifa
-      SET nombre_comprador = $1,
-          estado = TRUE,
-          fecha_venta = NOW()
-      WHERE numero = $2 AND estado = FALSE
-      RETURNING id, numero, nombre_comprador, estado, fecha_venta;
-      `,
-      [compradorLimpio, numeroLimpio]
+app.get(
+  '/api/health',
+  manejar(async (req, res) => {
+    const baseDeDatos = await db.verificarConexion();
+    res.json({ ok: true, baseDeDatos, fecha: new Date().toISOString() });
+  })
+);
+
+app.get('/api/config', (req, res) => {
+  res.json({ ok: true, precio: PRECIO_BOLETO, requierePin: Boolean(ADMIN_PIN) });
+});
+
+app.post('/api/sesion', (req, res) => {
+  const pin = req.body && req.body.pin;
+  if (!pinCorrecto(pin)) {
+    return res.status(401).json({ ok: false, mensaje: 'El PIN no es correcto.' });
+  }
+  res.json({ ok: true });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Rutas de boletos                                                           */
+/* -------------------------------------------------------------------------- */
+
+const boletos = express.Router();
+boletos.use(requierePin);
+
+/** GET /api/boletos — Los 100 boletos ordenados del 01 al 99 y finalmente el 00. */
+boletos.get(
+  '/',
+  manejar(async (req, res) => {
+    const lista = await db.listarBoletos();
+    const vendidos = lista.filter((b) => b.vendido).length;
+    res.json({
+      ok: true,
+      precio: PRECIO_BOLETO,
+      resumen: {
+        total: lista.length,
+        vendidos,
+        disponibles: lista.length - vendidos,
+        recaudado: vendidos * PRECIO_BOLETO,
+      },
+      boletos: lista,
+    });
+  })
+);
+
+/** GET /api/boletos/exportar — Lista de compradores en CSV (compatible con Excel). */
+boletos.get(
+  '/exportar',
+  manejar(async (req, res) => {
+    const lista = (await db.listarBoletos()).filter((b) => b.vendido);
+
+    const celda = (valor) => {
+      let texto = valor == null ? '' : String(valor);
+      // Evita que Excel interprete el contenido como formula.
+      if (/^[=+\-@]/.test(texto)) texto = "'" + texto;
+      return '"' + texto.replace(/"/g, '""') + '"';
+    };
+
+    const filas = [['Numero', 'Nombre', 'Telefono', 'Fecha de venta']].concat(
+      lista.map((b) => [
+        b.numero,
+        b.nombre,
+        b.telefono,
+        b.fechaVenta
+          ? new Date(b.fechaVenta).toLocaleString('es-CO', { timeZone: 'America/Bogota' })
+          : '',
+      ])
     );
 
-    if (result.rowCount === 0) {
+    const csv = '﻿' + filas.map((fila) => fila.map(celda).join(';')).join('\r\n');
+
+    res.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="compradores-rifa.csv"',
+      'Cache-Control': 'no-store',
+    });
+    res.send(csv);
+  })
+);
+
+/** POST /api/boletos/:numero/venta — Registra la venta con nombre y telefono. */
+boletos.post(
+  '/:numero/venta',
+  manejar(async (req, res) => {
+    const numero = numeroDesdeRuta(req, res);
+    if (!numero) return;
+
+    const comprador = validarComprador(req.body);
+    if (comprador.errores) {
+      return res.status(400).json({
+        ok: false,
+        mensaje: 'Revise los datos del comprador.',
+        errores: comprador.errores,
+      });
+    }
+
+    const boleto = await db.venderBoleto(numero, comprador.valor.nombre, comprador.valor.telefono);
+    if (!boleto) {
+      if (!(await db.existeBoleto(numero))) {
+        return res.status(404).json({ ok: false, mensaje: `El boleto ${numero} no existe.` });
+      }
       return res.status(409).json({
         ok: false,
-        mensaje: `El numero ${numeroLimpio} ya fue vendido o no esta disponible.`,
+        mensaje: `El numero ${numero} ya fue vendido por otra persona. Elija otro numero.`,
       });
     }
 
-    res.json({
-      ok: true,
-      mensaje: `Numero ${numeroLimpio} registrado exitosamente a nombre de ${compradorLimpio}.`,
-      boleto: result.rows[0],
-    });
-  } catch (error) {
-    console.error('[ERROR] POST /api/comprar:', error.message);
-    res.status(500).json({
-      ok: false,
-      mensaje: 'No se pudo guardar la venta en la base de datos.',
-    });
-  }
-});
+    res.status(201).json({ ok: true, boleto });
+  })
+);
 
-/**
- * POST /api/liberar
- * Permite liberar un numero desde el panel de Cuadre de Caja en caso de error de digitacion.
- * Body: { numero: "01" }
- */
-app.post('/api/liberar', async (req, res) => {
-  try {
-    const { numero } = req.body;
-    const numeroLimpio = String(numero || '').trim();
+/** PUT /api/boletos/:numero/venta — Corrige el nombre o telefono de un boleto vendido. */
+boletos.put(
+  '/:numero/venta',
+  manejar(async (req, res) => {
+    const numero = numeroDesdeRuta(req, res);
+    if (!numero) return;
 
-    if (!/^\d{2}$/.test(numeroLimpio)) {
+    const comprador = validarComprador(req.body);
+    if (comprador.errores) {
       return res.status(400).json({
         ok: false,
-        mensaje: 'Numero invalido.',
+        mensaje: 'Revise los datos del comprador.',
+        errores: comprador.errores,
       });
     }
 
-    const result = await pool.query(
-      `
-      UPDATE boletos_rifa
-      SET nombre_comprador = NULL,
-          estado = FALSE,
-          fecha_venta = NULL
-      WHERE numero = $1
-      RETURNING id, numero, nombre_comprador, estado, fecha_venta;
-      `,
-      [numeroLimpio]
+    const boleto = await db.actualizarComprador(
+      numero,
+      comprador.valor.nombre,
+      comprador.valor.telefono
     );
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({
-        ok: false,
-        mensaje: 'Boleto no encontrado.',
-      });
+    if (!boleto) {
+      return res.status(404).json({ ok: false, mensaje: `El numero ${numero} no esta vendido.` });
     }
 
-    res.json({
-      ok: true,
-      mensaje: `El numero ${numeroLimpio} esta disponible nuevamente.`,
-      boleto: result.rows[0],
-    });
-  } catch (error) {
-    console.error('[ERROR] POST /api/liberar:', error.message);
-    res.status(500).json({
-      ok: false,
-      mensaje: 'Error al liberar el boleto.',
-    });
-  }
+    res.json({ ok: true, boleto });
+  })
+);
+
+/** DELETE /api/boletos/:numero/venta — Anula la venta y libera el numero. */
+boletos.delete(
+  '/:numero/venta',
+  manejar(async (req, res) => {
+    const numero = numeroDesdeRuta(req, res);
+    if (!numero) return;
+
+    const boleto = await db.anularVenta(numero);
+    if (!boleto) {
+      return res.status(404).json({ ok: false, mensaje: `El numero ${numero} no esta vendido.` });
+    }
+
+    res.json({ ok: true, boleto });
+  })
+);
+
+app.use('/api/boletos', boletos);
+
+/* -------------------------------------------------------------------------- */
+/* Errores y frontend                                                         */
+/* -------------------------------------------------------------------------- */
+
+app.use('/api', (req, res) => {
+  res.status(404).json({ ok: false, mensaje: 'Ruta no encontrada.' });
 });
 
-/**
- * GET /api/health
- * Ruta de verificacion de estado para Railway
- */
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-// Fallback para servir el frontend
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(PORT, '0.0.0.0', async () => {
-  console.log(`[INFO] Servidor iniciado en el puerto ${PORT}`);
-  await initDatabase();
+// eslint-disable-next-line no-unused-vars
+app.use((error, req, res, next) => {
+  if (error.type === 'entity.parse.failed') {
+    return res.status(400).json({ ok: false, mensaje: 'La solicitud no tiene un formato valido.' });
+  }
+  const status = error.status || 500;
+  console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, error.message);
+  res.status(status).json({
+    ok: false,
+    mensaje:
+      status === 503
+        ? error.message
+        : 'Ocurrio un problema en el servidor. Intente de nuevo en unos segundos.',
+  });
 });
+
+/* -------------------------------------------------------------------------- */
+/* Arranque                                                                   */
+/* -------------------------------------------------------------------------- */
+
+async function iniciar() {
+  if (!process.env.DATABASE_URL) {
+    console.warn('[WARN] DATABASE_URL no esta definida. La API respondera con error 503.');
+  } else {
+    try {
+      await db.inicializar();
+      console.log('[INFO] Base de datos verificada (100 boletos disponibles en la tabla).');
+    } catch (error) {
+      console.error('[ERROR] No fue posible inicializar la base de datos:', error.message);
+    }
+  }
+
+  if (!ADMIN_PIN) {
+    console.warn('[WARN] ADMIN_PIN no esta definido: cualquier persona con la URL puede ver y modificar las ventas.');
+  }
+
+  const servidor = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[INFO] Servidor escuchando en el puerto ${PORT}`);
+  });
+
+  const apagar = (senal) => {
+    console.log(`[INFO] Senal ${senal} recibida. Cerrando servidor...`);
+    servidor.close(() => {
+      db.cerrar().finally(() => process.exit(0));
+    });
+    setTimeout(() => process.exit(1), 10000).unref();
+  };
+
+  process.on('SIGTERM', () => apagar('SIGTERM'));
+  process.on('SIGINT', () => apagar('SIGINT'));
+}
+
+iniciar();

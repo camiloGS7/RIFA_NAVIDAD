@@ -1,406 +1,765 @@
-const PRECIO_BOLETO = 10000;
+'use strict';
 
-let boletos = [];
-let numeroSeleccionado = null;
-let guardandoVenta = false;
+/* ==========================================================================
+   Gran Rifa Navideña — Lógica del cliente
+   ========================================================================== */
 
-// Referencias del DOM
-const grillaBoletos = document.getElementById('grilla-boletos');
-const estadoCarga = document.getElementById('estado-carga');
+const CLAVE_PIN = 'rifa-navidena-pin';
+const INTERVALO_ACTUALIZACION = 20000;
 
-const statDisponibles = document.getElementById('stat-disponibles');
-const statVendidos = document.getElementById('stat-vendidos');
-const statRecaudado = document.getElementById('stat-recaudado');
-const badgeVendidos = document.getElementById('badge-vendidos');
+const estado = {
+  precio: 10000,
+  boletos: [],
+  vistaActual: 'talonario',
+  seleccionado: null, // número abierto en la ventana
+  modoFormulario: 'vender', // 'vender' | 'corregir'
+  guardando: false,
+  temporizador: null,
+};
 
-const cuadreCantidad = document.getElementById('cuadre-cantidad');
-const cuadreTotalDinero = document.getElementById('cuadre-total-dinero');
-const tablaVendidosBody = document.getElementById('tabla-vendidos-body');
-const estadoSinVentas = document.getElementById('estado-sin-ventas');
-const inputBuscarVendido = document.getElementById('input-buscar-vendido');
+/* ------------------------------ Utilidades ------------------------------ */
 
-const panelCuadre = document.getElementById('panel-cuadre');
-const btnAbrirCuadre = document.getElementById('btn-abrir-cuadre');
-const btnCerrarCuadre = document.getElementById('btn-cerrar-cuadre');
-const btnRecargar = document.getElementById('btn-recargar');
+const $ = (selector) => document.querySelector(selector);
 
-const modalVenta = document.getElementById('modal-venta');
-const modalNumeroBadge = document.getElementById('modal-numero-badge');
-const modalNumeroTexto = document.getElementById('modal-numero-texto');
-const formVenta = document.getElementById('form-venta');
-const inputComprador = document.getElementById('input-comprador');
-const modalError = document.getElementById('modal-error');
-const btnCerrarModal = document.getElementById('btn-cerrar-modal');
-const btnCancelarVenta = document.getElementById('btn-cancelar-venta');
-const btnGuardarVenta = document.getElementById('btn-guardar-venta');
-const textoBtnGuardar = document.getElementById('texto-btn-guardar');
-
-const toastNotificacion = document.getElementById('toast-notificacion');
-const toastMensaje = document.getElementById('toast-mensaje');
-
-let toastTimeout = null;
-
-/**
- * Formatea un valor numerico en pesos colombianos ($10.000)
- */
-function formatearPesos(valor) {
-  return '$' + Number(valor).toLocaleString('es-CO');
+function leerPin() {
+  try {
+    return localStorage.getItem(CLAVE_PIN) || '';
+  } catch (e) {
+    return '';
+  }
 }
 
-/**
- * Formatea la fecha de venta de forma legible y corta
- */
-function formatearFecha(fechaIso) {
-  if (!fechaIso) return '-';
-  const fecha = new Date(fechaIso);
-  if (isNaN(fecha.getTime())) return '-';
+function guardarPin(pin) {
+  try {
+    localStorage.setItem(CLAVE_PIN, pin);
+  } catch (e) {
+    /* almacenamiento no disponible */
+  }
+}
+
+function formatearPesos(valor) {
+  return '$' + Number(valor || 0).toLocaleString('es-CO');
+}
+
+function formatearTelefono(digitos) {
+  const t = String(digitos || '');
+  if (t.length === 10) return `${t.slice(0, 3)} ${t.slice(3, 6)} ${t.slice(6)}`;
+  if (t.length === 12 && t.startsWith('57')) {
+    return `+57 ${t.slice(2, 5)} ${t.slice(5, 8)} ${t.slice(8)}`;
+  }
+  return t || '—';
+}
+
+function formatearFecha(iso) {
+  if (!iso) return '—';
+  const fecha = new Date(iso);
+  if (Number.isNaN(fecha.getTime())) return '—';
   return fecha.toLocaleString('es-CO', {
-    day: '2-digit',
-    month: 'short',
-    hour: '2-digit',
+    day: 'numeric',
+    month: 'long',
+    hour: 'numeric',
     minute: '2-digit',
   });
 }
 
 /**
- * Muestra un mensaje flotante rapido (Toast)
+ * Número en formato internacional. En Colombia celulares y fijos tienen
+ * 10 dígitos, así que a esos se les antepone el indicativo 57.
  */
-function mostrarToast(mensaje) {
-  toastMensaje.textContent = mensaje;
-  toastNotificacion.classList.remove('hidden');
-
-  if (toastTimeout) clearTimeout(toastTimeout);
-  toastTimeout = setTimeout(() => {
-    toastNotificacion.classList.add('hidden');
-  }, 3500);
+function telefonoWhatsApp(digitos) {
+  const t = String(digitos || '');
+  if (t.length === 10) return '57' + t;
+  return t;
 }
 
-/**
- * Genera una lista local de respaldo ('01' al '99' y '00') si aun no hay conexion a BD
- */
-function generarBoletosRespaldo() {
-  const lista = [];
-  for (let i = 1; i <= 100; i++) {
-    const numero = i === 100 ? '00' : String(i).padStart(2, '0');
-    lista.push({
-      id: i,
-      numero,
-      nombre_comprador: null,
-      estado: false,
-      fecha_venta: null,
-    });
+function enlaceLlamar(digitos) {
+  const t = telefonoWhatsApp(digitos);
+  return t.length >= 11 ? `tel:+${t}` : `tel:${t}`;
+}
+
+function enlaceWhatsApp(boleto, esGanador) {
+  const base = `https://wa.me/${telefonoWhatsApp(boleto.telefono)}`;
+  const texto = esGanador
+    ? `Hola ${boleto.nombre}, le escribimos de la Gran Rifa Navideña. ¡Felicitaciones! Su número ${boleto.numero} resultó ganador del sorteo. Comuníquese con nosotros para entregarle el premio.`
+    : `Hola ${boleto.nombre}, le escribimos de la Gran Rifa Navideña sobre su número ${boleto.numero}.`;
+  return `${base}?text=${encodeURIComponent(texto)}`;
+}
+
+function crear(etiqueta, clase, texto) {
+  const nodo = document.createElement(etiqueta);
+  if (clase) nodo.className = clase;
+  if (texto != null) nodo.textContent = texto;
+  return nodo;
+}
+
+function icono(nombre) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'icono');
+  svg.setAttribute('aria-hidden', 'true');
+  const uso = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  uso.setAttribute('href', '#i-' + nombre);
+  svg.appendChild(uso);
+  return svg;
+}
+
+function buscarBoleto(numero) {
+  return estado.boletos.find((b) => b.numero === numero) || null;
+}
+
+/* ------------------------------ API ------------------------------ */
+
+class ErrorApi extends Error {
+  constructor(mensaje, status, errores) {
+    super(mensaje);
+    this.status = status;
+    this.errores = errores || null;
   }
-  return lista;
 }
 
-/**
- * Obtiene los 100 boletos desde el Backend (Neon DB)
- */
-async function cargarBoletos() {
+async function api(ruta, opciones = {}) {
+  const cabeceras = { 'X-Admin-Pin': leerPin() };
+  if (opciones.cuerpo) cabeceras['Content-Type'] = 'application/json';
+
+  let respuesta;
   try {
-    const respuesta = await fetch('/api/boletos');
-    const data = await respuesta.json();
+    respuesta = await fetch(ruta, {
+      method: opciones.metodo || 'GET',
+      headers: cabeceras,
+      body: opciones.cuerpo ? JSON.stringify(opciones.cuerpo) : undefined,
+      cache: 'no-store',
+    });
+  } catch (e) {
+    throw new ErrorApi('No hay conexión a internet o el servidor no responde.', 0);
+  }
 
-    if (!respuesta.ok || !data.ok) {
-      throw new Error(data.mensaje || 'Error al cargar los boletos');
-    }
+  let datos = {};
+  try {
+    datos = await respuesta.json();
+  } catch (e) {
+    /* respuesta sin JSON */
+  }
 
-    boletos = data.boletos && data.boletos.length > 0
-      ? data.boletos
-      : generarBoletosRespaldo();
+  if (respuesta.status === 401) {
+    mostrarPantallaPin();
+    throw new ErrorApi(datos.mensaje || 'Se necesita el PIN.', 401);
+  }
+
+  if (!respuesta.ok || datos.ok === false) {
+    throw new ErrorApi(
+      datos.mensaje || 'Ocurrió un problema. Intente de nuevo.',
+      respuesta.status,
+      datos.errores
+    );
+  }
+  return datos;
+}
+
+/* ------------------------------ Carga de datos ------------------------------ */
+
+async function cargarBoletos({ silencioso = false } = {}) {
+  try {
+    const datos = await api('/api/boletos');
+    estado.boletos = datos.boletos;
+    if (datos.precio) estado.precio = datos.precio;
+    $('#aviso-error').hidden = true;
+    renderizar();
   } catch (error) {
-    console.error('Error cargando boletos:', error);
-    if (boletos.length === 0) {
-      boletos = generarBoletosRespaldo();
+    if (error.status === 401) return;
+    if (!silencioso || estado.boletos.length === 0) {
+      $('#aviso-error-texto').textContent =
+        error.status === 503
+          ? 'La base de datos no está disponible en este momento.'
+          : error.message;
+      $('#aviso-error').hidden = false;
     }
-    mostrarToast('Verifica la conexion a la base de datos (DATABASE_URL).');
   } finally {
-    estadoCarga.classList.add('hidden');
-    grillaBoletos.classList.remove('hidden');
-    renderizarTodo();
+    $('#grilla-cargando').hidden = estado.boletos.length > 0 || !$('#aviso-error').hidden;
+    $('#grilla').hidden = estado.boletos.length === 0;
   }
 }
 
-/**
- * Renderiza tanto la cuadricula 10x10 como las estadisticas y la tabla de Cuadre de Caja
- */
-function renderizarTodo() {
-  renderizarGrilla();
-  renderizarEstadisticasYCuadre();
+function programarActualizacion() {
+  clearInterval(estado.temporizador);
+  estado.temporizador = setInterval(() => {
+    const ventanaAbierta = $('#dialogo').open;
+    if (document.visibilityState === 'visible' && !ventanaAbierta && !estado.guardando) {
+      cargarBoletos({ silencioso: true });
+    }
+  }, INTERVALO_ACTUALIZACION);
 }
 
-/**
- * Construye la cuadricula 10x10 del 01 al 99 y terminando en 00
- */
-function renderizarGrilla() {
-  grillaBoletos.innerHTML = '';
+/* ------------------------------ Renderizado ------------------------------ */
 
-  boletos.forEach((boleto) => {
-    const boton = document.createElement('button');
+function renderizar() {
+  renderizarResumen();
+  renderizarGrilla();
+  renderizarCompradores();
+  if ($('#resultado-ganador').dataset.numero) {
+    mostrarGanador($('#resultado-ganador').dataset.numero);
+  }
+}
+
+function renderizarResumen() {
+  const vendidos = estado.boletos.filter((b) => b.vendido).length;
+  const total = estado.boletos.length || 100;
+  $('#res-vendidos').textContent = vendidos;
+  $('#res-disponibles').textContent = total - vendidos;
+  $('#res-recaudado').textContent = formatearPesos(vendidos * estado.precio);
+  $('#res-barra').style.width = `${(vendidos / total) * 100}%`;
+  document.querySelectorAll('[data-precio]').forEach((n) => {
+    n.textContent = formatearPesos(estado.precio);
+  });
+}
+
+function renderizarGrilla() {
+  const grilla = $('#grilla');
+  const fragmento = document.createDocumentFragment();
+
+  estado.boletos.forEach((boleto) => {
+    const boton = crear('button', 'numero' + (boleto.vendido ? ' numero--vendido' : ''));
+    boton.type = 'button';
+    boton.dataset.numero = boleto.numero;
+    boton.setAttribute(
+      'aria-label',
+      boleto.vendido
+        ? `Número ${boleto.numero}, vendido a ${boleto.nombre}`
+        : `Número ${boleto.numero}, libre`
+    );
+    boton.appendChild(crear('span', null, boleto.numero));
+
+    if (boleto.vendido) {
+      const marca = crear('span', 'numero__marca');
+      marca.appendChild(icono('check'));
+      boton.appendChild(marca);
+    }
+    fragmento.appendChild(boton);
+  });
+
+  grilla.replaceChildren(fragmento);
+}
+
+function renderizarCompradores() {
+  const vendidos = estado.boletos.filter((b) => b.vendido);
+  const termino = $('#buscar').value.trim().toLowerCase();
+  const terminoDigitos = termino.replace(/\D/g, '');
+
+  const filtrados = vendidos.filter((b) => {
+    if (!termino) return true;
+    return (
+      (b.nombre || '').toLowerCase().includes(termino) ||
+      b.numero.includes(termino) ||
+      (terminoDigitos.length >= 3 && (b.telefono || '').includes(terminoDigitos))
+    );
+  });
+
+  $('#compradores-conteo').textContent =
+    vendidos.length === 0
+      ? 'Aún no hay ventas.'
+      : `${vendidos.length} ${vendidos.length === 1 ? 'número vendido' : 'números vendidos'}.`;
+
+  const lista = $('#lista-compradores');
+  const fragmento = document.createDocumentFragment();
+
+  filtrados.forEach((boleto) => {
+    const item = crear('li');
+    const boton = crear('button', 'comprador');
     boton.type = 'button';
     boton.dataset.numero = boleto.numero;
 
-    if (boleto.estado) {
-      // Boleto VENDIDO (Deshabilitado para evitar dobles ventas)
-      boton.disabled = true;
-      boton.className =
-        'boleto-vendido aspect-square flex flex-col items-center justify-center rounded-md sm:rounded-lg font-black text-sm sm:text-lg md:text-xl select-none p-0.5';
-      boton.title = `VENDIDO a: ${boleto.nombre_comprador || 'Comprador registrado'}`;
-      boton.innerHTML = `
-        <span class="leading-none line-through decoration-amber-400/80">${boleto.numero}</span>
-        <span class="text-[8px] sm:text-[9px] leading-none text-amber-300 font-extrabold mt-0.5 uppercase tracking-tighter">VENDIDO</span>
-      `;
-    } else {
-      // Boleto DISPONIBLE
-      boton.className =
-        'boleto-disponible aspect-square flex items-center justify-center rounded-md sm:rounded-lg font-extrabold text-sm sm:text-lg md:text-xl cursor-pointer select-none';
-      boton.title = `Boleto #${boleto.numero} disponible - Clic para vender`;
-      boton.textContent = boleto.numero;
+    boton.appendChild(crear('span', 'ficha', boleto.numero));
+    const info = crear('span', 'comprador__info');
+    info.appendChild(crear('span', 'comprador__nombre', boleto.nombre));
+    info.appendChild(crear('span', 'comprador__telefono', formatearTelefono(boleto.telefono)));
+    boton.appendChild(info);
 
-      boton.addEventListener('click', () => abrirModalVenta(boleto.numero));
-    }
+    item.appendChild(boton);
+    fragmento.appendChild(item);
+  });
 
-    grillaBoletos.appendChild(boton);
+  lista.replaceChildren(fragmento);
+
+  const vacio = $('#lista-vacia');
+  if (filtrados.length === 0) {
+    vacio.textContent = termino
+      ? 'No se encontró ningún comprador con esa búsqueda.'
+      : 'Cuando venda un número, el comprador aparecerá aquí.';
+    vacio.hidden = false;
+  } else {
+    vacio.hidden = true;
+  }
+}
+
+/* ------------------------------ Pestañas ------------------------------ */
+
+function cambiarVista(vista, { enfocar = false } = {}) {
+  estado.vistaActual = vista;
+  document.querySelectorAll('.pestana').forEach((pestana) => {
+    const activa = pestana.dataset.vista === vista;
+    pestana.setAttribute('aria-selected', String(activa));
+    pestana.tabIndex = activa ? 0 : -1;
+    if (activa && enfocar) pestana.focus();
+  });
+  document.querySelectorAll('.vista').forEach((panel) => {
+    panel.hidden = panel.id !== `vista-${vista}`;
   });
 }
 
-/**
- * Actualiza los contadores superiores y la tabla del panel de Cuadre de Caja
- */
-function renderizarEstadisticasYCuadre() {
-  const vendidos = boletos.filter((b) => b.estado === true);
-  const cantidadVendidos = vendidos.length;
-  const cantidadDisponibles = boletos.length - cantidadVendidos;
-  const totalRecaudado = cantidadVendidos * PRECIO_BOLETO;
+/* ------------------------------ Ventana del número ------------------------------ */
 
-  // Contadores barra superior
-  statDisponibles.textContent = cantidadDisponibles;
-  statVendidos.textContent = cantidadVendidos;
-  statRecaudado.textContent = formatearPesos(totalRecaudado);
-  badgeVendidos.textContent = cantidadVendidos;
-
-  // Contadores panel de Cuadre
-  cuadreCantidad.textContent = cantidadVendidos;
-  cuadreTotalDinero.textContent = formatearPesos(totalRecaudado);
-
-  // Filtrado por buscador
-  const termino = (inputBuscarVendido.value || '').trim().toLowerCase();
-  const vendidosFiltrados = vendidos.filter((b) => {
-    if (!termino) return true;
-    const coincideNumero = b.numero.toLowerCase().includes(termino);
-    const coincideNombre = (b.nombre_comprador || '').toLowerCase().includes(termino);
-    return coincideNumero || coincideNombre;
+function limpiarErrores() {
+  ['nombre', 'telefono'].forEach((campo) => {
+    $(`#campo-${campo}`).removeAttribute('aria-invalid');
+    $(`#error-${campo}`).hidden = true;
   });
+  $('#error-general').hidden = true;
+}
 
-  tablaVendidosBody.innerHTML = '';
+function mostrarErrorCampo(campo, mensaje) {
+  $(`#campo-${campo}`).setAttribute('aria-invalid', 'true');
+  const nodo = $(`#error-${campo}`);
+  nodo.textContent = mensaje;
+  nodo.hidden = false;
+}
 
-  if (vendidosFiltrados.length === 0) {
-    estadoSinVentas.classList.remove('hidden');
-    estadoSinVentas.textContent = termino
-      ? 'No se encontraron ventas que coincidan con la busqueda.'
-      : 'Aun no hay boletos vendidos. Haz clic en un numero de la cuadricula para registrar la primera venta.';
-    return;
+function abrirNumero(numero) {
+  const boleto = buscarBoleto(numero);
+  if (!boleto) return;
+  estado.seleccionado = numero;
+
+  $('#dialogo-ficha').textContent = numero;
+  $('#dialogo-titulo').textContent = `Número ${numero}`;
+  $('#confirmar-anular').hidden = true;
+  limpiarErrores();
+
+  if (boleto.vendido) {
+    mostrarDetalle(boleto);
+  } else {
+    mostrarFormulario('vender', boleto);
   }
 
-  estadoSinVentas.classList.add('hidden');
+  const dialogo = $('#dialogo');
+  if (!dialogo.open) dialogo.showModal();
 
-  vendidosFiltrados.forEach((boleto) => {
-    const fila = document.createElement('tr');
-    fila.className = 'hover:bg-red-900/40 transition';
-
-    const tdNumero = document.createElement('td');
-    tdNumero.className = 'py-2.5 px-3 font-black text-amber-300 text-base';
-    tdNumero.textContent = `#${boleto.numero}`;
-
-    const tdComprador = document.createElement('td');
-    tdComprador.className = 'py-2.5 px-3 font-bold text-white';
-    tdComprador.textContent = boleto.nombre_comprador || '-';
-
-    const tdFecha = document.createElement('td');
-    tdFecha.className = 'py-2.5 px-3 text-xs text-red-200 hidden sm:table-cell whitespace-nowrap';
-    tdFecha.textContent = formatearFecha(boleto.fecha_venta);
-
-    const tdAccion = document.createElement('td');
-    tdAccion.className = 'py-2.5 px-3 text-right';
-
-    const btnLiberar = document.createElement('button');
-    btnLiberar.type = 'button';
-    btnLiberar.className =
-      'px-2.5 py-1 rounded-lg bg-red-900/90 hover:bg-red-700 text-red-200 hover:text-white text-xs font-bold border border-red-400/30 transition';
-    btnLiberar.title = 'Anular venta y liberar numero';
-    btnLiberar.textContent = 'Anular';
-    btnLiberar.addEventListener('click', () => liberarBoleto(boleto));
-
-    tdAccion.appendChild(btnLiberar);
-
-    fila.appendChild(tdNumero);
-    fila.appendChild(tdComprador);
-    fila.appendChild(tdFecha);
-    fila.appendChild(tdAccion);
-
-    tablaVendidosBody.appendChild(fila);
-  });
+  if (!boleto.vendido) {
+    setTimeout(() => $('#campo-nombre').focus(), 60);
+  }
 }
 
-/**
- * Abre el modal rapido para vender el numero seleccionado
- */
-function abrirModalVenta(numero) {
-  numeroSeleccionado = numero;
-  modalNumeroBadge.textContent = numero;
-  modalNumeroTexto.textContent = numero;
-  inputComprador.value = '';
-  modalError.classList.add('hidden');
-  modalError.textContent = '';
-
-  modalVenta.classList.remove('hidden');
-
-  // Foco inmediato en el campo de nombre para escribir y presionar Enter sin mas clics
-  setTimeout(() => {
-    inputComprador.focus();
-  }, 40);
+function marcarEstado(vendido) {
+  const etiqueta = $('#dialogo-estado');
+  etiqueta.textContent = vendido ? 'Vendido' : 'Libre';
+  etiqueta.classList.toggle('dialogo__estado--vendido', vendido);
+  $('#dialogo-ficha').classList.toggle('ficha--libre', !vendido);
 }
 
-/**
- * Cierra el modal de venta
- */
-function cerrarModalVenta() {
-  if (guardandoVenta) return;
-  modalVenta.classList.add('hidden');
-  numeroSeleccionado = null;
-  inputComprador.value = '';
-  modalError.classList.add('hidden');
+function mostrarFormulario(modo, boleto) {
+  estado.modoFormulario = modo;
+  marcarEstado(boleto.vendido);
+
+  $('#detalle').hidden = true;
+  $('#form-comprador').hidden = false;
+
+  if (modo === 'vender') {
+    $('#form-ayuda').textContent = `Anote los datos de quien compra el número ${boleto.numero}.`;
+    $('#boton-guardar-texto').textContent = 'Guardar venta';
+    $('#campo-nombre').value = '';
+    $('#campo-telefono').value = '';
+  } else {
+    $('#form-ayuda').textContent = 'Corrija el nombre o el teléfono y guarde los cambios.';
+    $('#boton-guardar-texto').textContent = 'Guardar cambios';
+    $('#campo-nombre').value = boleto.nombre || '';
+    $('#campo-telefono').value = formatearTelefono(boleto.telefono);
+  }
 }
 
-/**
- * Registra la compra en Neon DB al presionar Enter o hacer clic en Guardar
- */
-formVenta.addEventListener('submit', async (evento) => {
+function mostrarDetalle(boleto) {
+  marcarEstado(true);
+  $('#form-comprador').hidden = true;
+  $('#detalle').hidden = false;
+  $('#confirmar-anular').hidden = true;
+
+  $('#detalle-nombre').textContent = boleto.nombre || '—';
+  $('#detalle-telefono').textContent = formatearTelefono(boleto.telefono);
+  $('#detalle-fecha').textContent = formatearFecha(boleto.fechaVenta);
+  $('#detalle-llamar').href = enlaceLlamar(boleto.telefono);
+  $('#detalle-whatsapp').href = enlaceWhatsApp(boleto, false);
+}
+
+function cerrarDialogo() {
+  if (estado.guardando) return;
+  $('#dialogo').close();
+}
+
+function actualizarBoletoLocal(boleto) {
+  const indice = estado.boletos.findIndex((b) => b.numero === boleto.numero);
+  if (indice !== -1) estado.boletos[indice] = boleto;
+  renderizar();
+}
+
+function resaltarNumero(numero) {
+  const celda = document.querySelector(`.numero[data-numero="${numero}"]`);
+  if (!celda) return;
+  celda.classList.remove('numero--resaltado');
+  void celda.offsetWidth; // reinicia la animación
+  celda.classList.add('numero--resaltado');
+}
+
+async function enviarFormulario(evento) {
   evento.preventDefault();
-  if (guardandoVenta || !numeroSeleccionado) return;
+  if (estado.guardando || !estado.seleccionado) return;
+  limpiarErrores();
 
-  const nombreComprador = inputComprador.value.trim();
-  if (!nombreComprador) {
-    modalError.textContent = 'Por favor escribe el nombre del comprador.';
-    modalError.classList.remove('hidden');
-    inputComprador.focus();
+  const nombre = $('#campo-nombre').value.replace(/\s+/g, ' ').trim();
+  const telefono = $('#campo-telefono').value.trim();
+  const digitos = telefono.replace(/\D/g, '');
+
+  let valido = true;
+  if (nombre.length < 3) {
+    mostrarErrorCampo('nombre', 'Escriba el nombre completo del comprador.');
+    valido = false;
+  }
+  if (digitos.length === 0) {
+    mostrarErrorCampo('telefono', 'Escriba un teléfono para poder avisarle si gana.');
+    valido = false;
+  } else if (digitos.length < 7 || digitos.length > 15) {
+    mostrarErrorCampo('telefono', 'El teléfono parece incompleto. Ejemplo: 300 123 4567.');
+    valido = false;
+  }
+  if (!valido) {
+    const primerError = document.querySelector('#form-comprador [aria-invalid="true"]');
+    if (primerError) primerError.focus();
     return;
   }
 
-  guardandoVenta = true;
-  btnGuardarVenta.disabled = true;
-  textoBtnGuardar.textContent = 'Guardando...';
-  modalError.classList.add('hidden');
+  const numero = estado.seleccionado;
+  const esVenta = estado.modoFormulario === 'vender';
+  const boton = $('#boton-guardar');
+  const textoOriginal = $('#boton-guardar-texto').textContent;
+
+  estado.guardando = true;
+  boton.disabled = true;
+  $('#boton-guardar-texto').textContent = 'Guardando…';
 
   try {
-    const respuesta = await fetch('/api/comprar', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        numero: numeroSeleccionado,
-        nombre_comprador: nombreComprador,
-      }),
+    const datos = await api(`/api/boletos/${numero}/venta`, {
+      metodo: esVenta ? 'POST' : 'PUT',
+      cuerpo: { nombre, telefono },
     });
-
-    const data = await respuesta.json();
-
-    if (!respuesta.ok || !data.ok) {
-      throw new Error(data.mensaje || 'No se pudo registrar la venta.');
-    }
-
-    // Actualizar en memoria el boleto vendido inmediatamente
-    const idx = boletos.findIndex((b) => b.numero === numeroSeleccionado);
-    if (idx !== -1 && data.boleto) {
-      boletos[idx] = data.boleto;
-    }
-
-    const numeroVendido = numeroSeleccionado;
-    guardandoVenta = false;
-    btnGuardarVenta.disabled = false;
-    textoBtnGuardar.textContent = 'Guardar Venta';
-
-    cerrarModalVenta();
-    renderizarTodo();
-    mostrarToast(`Boleto #${numeroVendido} registrado a nombre de ${nombreComprador}.`);
+    estado.guardando = false;
+    actualizarBoletoLocal(datos.boleto);
+    $('#dialogo').close();
+    resaltarNumero(numero);
+    notificar(
+      esVenta
+        ? `Número ${numero} vendido a ${datos.boleto.nombre}.`
+        : `Datos del número ${numero} actualizados.`
+    );
   } catch (error) {
-    guardandoVenta = false;
-    btnGuardarVenta.disabled = false;
-    textoBtnGuardar.textContent = 'Guardar Venta';
-
-    modalError.textContent = error.message;
-    modalError.classList.remove('hidden');
-    await cargarBoletos();
-  }
-});
-
-/**
- * Permite anular una venta en caso de error de digitacion en el mostrador
- */
-async function liberarBoleto(boleto) {
-  const confirmar = window.confirm(
-    `¿Deseas anular la venta del boleto #${boleto.numero} (${boleto.nombre_comprador}) y dejarlo disponible de nuevo?`
-  );
-  if (!confirmar) return;
-
-  try {
-    const respuesta = await fetch('/api/liberar', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ numero: boleto.numero }),
-    });
-
-    const data = await respuesta.json();
-    if (!respuesta.ok || !data.ok) {
-      throw new Error(data.mensaje || 'No se pudo liberar el boleto.');
+    estado.guardando = false;
+    if (error.errores) {
+      Object.keys(error.errores).forEach((campo) => mostrarErrorCampo(campo, error.errores[campo]));
+    } else {
+      $('#error-general').textContent = error.message;
+      $('#error-general').hidden = false;
     }
-
-    const idx = boletos.findIndex((b) => b.numero === boleto.numero);
-    if (idx !== -1 && data.boleto) {
-      boletos[idx] = data.boleto;
+    if (error.status === 409) {
+      // Otro vendedor lo tomó primero: refrescar para mostrar el estado real.
+      await cargarBoletos({ silencioso: true });
     }
-
-    renderizarTodo();
-    mostrarToast(`Boleto #${boleto.numero} liberado y disponible nuevamente.`);
-  } catch (error) {
-    mostrarToast(error.message);
+  } finally {
+    boton.disabled = false;
+    $('#boton-guardar-texto').textContent = textoOriginal;
   }
 }
 
-// Eventos de cierre de Modal y Panel Lateral
-btnCerrarModal.addEventListener('click', cerrarModalVenta);
-btnCancelarVenta.addEventListener('click', cerrarModalVenta);
+async function anularVenta() {
+  const numero = estado.seleccionado;
+  if (!numero || estado.guardando) return;
+  const boton = document.querySelector('[data-accion="anular"]');
+  estado.guardando = true;
+  boton.disabled = true;
 
-modalVenta.addEventListener('click', (e) => {
-  if (e.target === modalVenta) cerrarModalVenta();
-});
-
-btnAbrirCuadre.addEventListener('click', () => {
-  panelCuadre.classList.remove('hidden');
-  setTimeout(() => inputBuscarVendido.focus(), 50);
-});
-
-btnCerrarCuadre.addEventListener('click', () => {
-  panelCuadre.classList.add('hidden');
-});
-
-panelCuadre.addEventListener('click', (e) => {
-  if (e.target === panelCuadre) {
-    panelCuadre.classList.add('hidden');
+  try {
+    const datos = await api(`/api/boletos/${numero}/venta`, { metodo: 'DELETE' });
+    estado.guardando = false;
+    actualizarBoletoLocal(datos.boleto);
+    $('#dialogo').close();
+    notificar(`La venta del número ${numero} fue anulada. El número quedó libre.`);
+  } catch (error) {
+    estado.guardando = false;
+    notificar(error.message, true);
+    await cargarBoletos({ silencioso: true });
+  } finally {
+    boton.disabled = false;
   }
-});
+}
 
-inputBuscarVendido.addEventListener('input', renderizarEstadisticasYCuadre);
-btnRecargar.addEventListener('click', cargarBoletos);
+/* ------------------------------ Ganador ------------------------------ */
 
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    if (!modalVenta.classList.contains('hidden')) {
-      cerrarModalVenta();
-    } else if (!panelCuadre.classList.contains('hidden') && window.innerWidth < 1024) {
-      panelCuadre.classList.add('hidden');
+function mostrarGanador(numero) {
+  const contenedor = $('#resultado-ganador');
+  contenedor.dataset.numero = numero;
+  const boleto = buscarBoleto(numero);
+  const tarjeta = crear('div', 'tarjeta-ganador');
+  const cabecera = crear('div', 'tarjeta-ganador__cabecera');
+
+  if (boleto && boleto.vendido) {
+    cabecera.appendChild(crear('span', 'ficha', numero));
+    const titulos = crear('div');
+    titulos.appendChild(crear('p', 'texto-suave', 'El número ganador lo compró:'));
+    titulos.appendChild(crear('h3', null, boleto.nombre));
+    cabecera.appendChild(titulos);
+    tarjeta.appendChild(cabecera);
+
+    const datos = crear('dl', 'datos');
+    [
+      ['Teléfono', formatearTelefono(boleto.telefono)],
+      ['Fecha de compra', formatearFecha(boleto.fechaVenta)],
+    ].forEach(([titulo, valor]) => {
+      const fila = crear('div');
+      fila.appendChild(crear('dt', null, titulo));
+      fila.appendChild(crear('dd', null, valor));
+      datos.appendChild(fila);
+    });
+    tarjeta.appendChild(datos);
+
+    const acciones = crear('div', 'acciones');
+    const llamar = crear('a', 'boton boton--primario');
+    llamar.href = enlaceLlamar(boleto.telefono);
+    llamar.append(icono('phone'), crear('span', null, 'Llamar al ganador'));
+    const whatsapp = crear('a', 'boton boton--whatsapp');
+    whatsapp.href = enlaceWhatsApp(boleto, true);
+    whatsapp.target = '_blank';
+    whatsapp.rel = 'noopener';
+    whatsapp.append(icono('chat'), crear('span', null, 'Avisar por WhatsApp'));
+    acciones.append(llamar, whatsapp);
+    tarjeta.appendChild(acciones);
+  } else {
+    tarjeta.classList.add('tarjeta-ganador--sin-venta');
+    const ficha = crear('span', 'ficha ficha--libre', numero);
+    cabecera.appendChild(ficha);
+    const titulos = crear('div');
+    titulos.appendChild(crear('h3', null, 'Este número no se vendió'));
+    titulos.appendChild(
+      crear('p', 'texto-suave', 'Nadie compró el número ' + numero + ', así que no hay ganador con él.')
+    );
+    cabecera.appendChild(titulos);
+    tarjeta.appendChild(cabecera);
+  }
+
+  contenedor.replaceChildren(tarjeta);
+}
+
+function enviarGanador(evento) {
+  evento.preventDefault();
+  const campo = $('#numero-ganador');
+  const error = $('#error-ganador');
+  const valor = campo.value.replace(/\D/g, '');
+
+  if (valor.length !== 2) {
+    campo.setAttribute('aria-invalid', 'true');
+    error.textContent = 'Escriba exactamente 2 cifras, por ejemplo 07 o 45.';
+    error.hidden = false;
+    campo.focus();
+    return;
+  }
+  campo.removeAttribute('aria-invalid');
+  error.hidden = true;
+  mostrarGanador(valor);
+}
+
+/* ------------------------------ Descarga ------------------------------ */
+
+async function descargarLista(evento) {
+  evento.preventDefault();
+  try {
+    const respuesta = await fetch('/api/boletos/exportar', {
+      headers: { 'X-Admin-Pin': leerPin() },
+      cache: 'no-store',
+    });
+    if (respuesta.status === 401) {
+      mostrarPantallaPin();
+      return;
     }
+    if (!respuesta.ok) throw new Error();
+    const archivo = await respuesta.blob();
+    const url = URL.createObjectURL(archivo);
+    const enlace = crear('a');
+    enlace.href = url;
+    enlace.download = 'compradores-rifa.csv';
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  } catch (e) {
+    notificar('No se pudo descargar la lista. Intente de nuevo.', true);
   }
-});
+}
 
-// Inicializar aplicacion al cargar
-document.addEventListener('DOMContentLoaded', cargarBoletos);
+/* ------------------------------ PIN ------------------------------ */
+
+function mostrarPantallaPin() {
+  const pantalla = $('#pantalla-pin');
+  if (!pantalla.hidden) return;
+  if ($('#dialogo').open) $('#dialogo').close();
+  pantalla.hidden = false;
+  setTimeout(() => $('#campo-pin').focus(), 50);
+}
+
+async function enviarPin(evento) {
+  evento.preventDefault();
+  const pin = $('#campo-pin').value.trim();
+  const error = $('#error-pin');
+  if (!pin) {
+    error.textContent = 'Escriba el PIN.';
+    error.hidden = false;
+    return;
+  }
+
+  try {
+    const respuesta = await fetch('/api/sesion', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin }),
+    });
+    if (!respuesta.ok) {
+      error.textContent = 'El PIN no es correcto. Intente de nuevo.';
+      error.hidden = false;
+      $('#campo-pin').select();
+      return;
+    }
+    guardarPin(pin);
+    $('#pantalla-pin').hidden = true;
+    $('#campo-pin').value = '';
+    error.hidden = true;
+    cargarBoletos();
+  } catch (e) {
+    error.textContent = 'No hay conexión con el servidor.';
+    error.hidden = false;
+  }
+}
+
+/* ------------------------------ Notificación ------------------------------ */
+
+let temporizadorNotificacion = null;
+
+function notificar(mensaje, esError = false) {
+  const caja = $('#notificacion');
+  $('#notificacion-texto').textContent = mensaje;
+  caja.classList.toggle('notificacion--error', esError);
+  caja.querySelector('use').setAttribute('href', esError ? '#i-alert' : '#i-check');
+  caja.hidden = false;
+  clearTimeout(temporizadorNotificacion);
+  temporizadorNotificacion = setTimeout(() => {
+    caja.hidden = true;
+  }, 5000);
+}
+
+/* ------------------------------ Eventos ------------------------------ */
+
+function registrarEventos() {
+  $('#grilla').addEventListener('click', (e) => {
+    const celda = e.target.closest('.numero');
+    if (celda) abrirNumero(celda.dataset.numero);
+  });
+
+  $('#lista-compradores').addEventListener('click', (e) => {
+    const item = e.target.closest('.comprador');
+    if (item) abrirNumero(item.dataset.numero);
+  });
+
+  document.querySelectorAll('.pestana').forEach((pestana) => {
+    pestana.addEventListener('click', () => cambiarVista(pestana.dataset.vista));
+  });
+
+  // Navegación con flechas entre pestañas (patrón ARIA de pestañas).
+  $('.pestanas__lista').addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    const vistas = ['talonario', 'compradores', 'ganador'];
+    const actual = vistas.indexOf(estado.vistaActual);
+    const siguiente = (actual + (e.key === 'ArrowRight' ? 1 : -1) + vistas.length) % vistas.length;
+    cambiarVista(vistas[siguiente], { enfocar: true });
+  });
+
+  document.addEventListener('click', (e) => {
+    const disparador = e.target.closest('[data-accion]');
+    if (!disparador) return;
+    const accion = disparador.dataset.accion;
+    const boleto = buscarBoleto(estado.seleccionado);
+
+    if (accion === 'recargar') cargarBoletos();
+    if (accion === 'cerrar') cerrarDialogo();
+    if (accion === 'cancelar-formulario') {
+      if (estado.modoFormulario === 'corregir' && boleto) {
+        limpiarErrores();
+        mostrarDetalle(boleto);
+      } else {
+        cerrarDialogo();
+      }
+    }
+    if (accion === 'corregir' && boleto) {
+      mostrarFormulario('corregir', boleto);
+      $('#campo-nombre').focus();
+    }
+    if (accion === 'pedir-anular') {
+      $('#confirmar-anular').hidden = false;
+      document.querySelector('[data-accion="anular"]').focus();
+    }
+    if (accion === 'cancelar-anular') $('#confirmar-anular').hidden = true;
+    if (accion === 'anular') anularVenta();
+  });
+
+  const dialogo = $('#dialogo');
+  dialogo.addEventListener('cancel', (e) => {
+    if (estado.guardando) e.preventDefault();
+  });
+  dialogo.addEventListener('click', (e) => {
+    if (e.target === dialogo) cerrarDialogo(); // clic fuera del contenido
+  });
+  dialogo.addEventListener('close', () => {
+    const numero = estado.seleccionado;
+    estado.seleccionado = null;
+    const celda = document.querySelector(`.numero[data-numero="${numero}"]`);
+    if (celda && estado.vistaActual === 'talonario') celda.focus({ preventScroll: true });
+  });
+
+  $('#form-comprador').addEventListener('submit', enviarFormulario);
+  $('#form-ganador').addEventListener('submit', enviarGanador);
+  $('#form-pin').addEventListener('submit', enviarPin);
+  $('#buscar').addEventListener('input', renderizarCompradores);
+  $('#enlace-exportar').addEventListener('click', descargarLista);
+
+  $('#numero-ganador').addEventListener('input', (e) => {
+    e.target.value = e.target.value.replace(/\D/g, '').slice(0, 2);
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && !$('#dialogo').open) {
+      cargarBoletos({ silencioso: true });
+    }
+  });
+}
+
+/* ------------------------------ Inicio ------------------------------ */
+
+async function iniciar() {
+  registrarEventos();
+  programarActualizacion();
+
+  try {
+    const respuesta = await fetch('/api/config', { cache: 'no-store' });
+    const config = await respuesta.json();
+    if (config.precio) estado.precio = config.precio;
+    renderizarResumen();
+    if (config.requierePin && !leerPin()) {
+      mostrarPantallaPin();
+      return;
+    }
+  } catch (e) {
+    /* si falla, cargarBoletos mostrará el aviso */
+  }
+
+  await cargarBoletos();
+}
+
+iniciar();

@@ -1,29 +1,26 @@
 -- ============================================================================
--- Script de Inicialización para Neon DB (PostgreSQL)
--- Proyecto: Gran Rifa Navideña
+-- Esquema de base de datos - Gran Rifa Navidena
+-- Motor: PostgreSQL (Neon DB)
+--
+-- Este script es idempotente: puede ejecutarse varias veces sin afectar las
+-- ventas ya registradas. El servidor ejecuta la misma logica al arrancar
+-- (lib/db.js), por lo que su uso manual es opcional.
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS boletos_rifa (
-    id SERIAL PRIMARY KEY,
-    numero VARCHAR(2) UNIQUE NOT NULL,
+    id               SERIAL PRIMARY KEY,
+    numero           VARCHAR(2)   UNIQUE NOT NULL,       -- '01' a '99' y '00'
     nombre_comprador VARCHAR(150) DEFAULT NULL,
-    estado BOOLEAN NOT NULL DEFAULT FALSE, -- FALSE = Disponible, TRUE = Vendido
-    fecha_venta TIMESTAMP WITH TIME ZONE DEFAULT NULL
+    telefono         VARCHAR(20)  DEFAULT NULL,          -- Solo digitos
+    estado           BOOLEAN      NOT NULL DEFAULT FALSE, -- FALSE = disponible, TRUE = vendido
+    fecha_venta      TIMESTAMPTZ  DEFAULT NULL
 );
 
--- Índice para búsquedas rápidas por número y estado
-CREATE INDEX IF NOT EXISTS idx_boletos_rifa_numero ON boletos_rifa (numero);
-CREATE INDEX IF NOT EXISTS idx_boletos_rifa_estado ON boletos_rifa (estado);
+-- Migracion para bases creadas con la version anterior (sin telefono).
+ALTER TABLE boletos_rifa ADD COLUMN IF NOT EXISTS telefono VARCHAR(20) DEFAULT NULL;
 
--- Poblar automáticamente los 100 números: del '01' al '99' y finalmente el '00'
-INSERT INTO boletos_rifa (numero, nombre_comprador, estado, fecha_venta)
-SELECT
-    CASE
-        WHEN n = 100 THEN '00'
-        ELSE LPAD(n::TEXT, 2, '0')
-    END AS numero,
-    NULL AS nombre_comprador,
-    FALSE AS estado,
-    NULL AS fecha_venta
+-- Poblar los 100 numeros: del '01' al '99' y finalmente el '00'.
+INSERT INTO boletos_rifa (numero)
+SELECT LPAD((n % 100)::TEXT, 2, '0')
 FROM generate_series(1, 100) AS n
 ON CONFLICT (numero) DO NOTHING;
